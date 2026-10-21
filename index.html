@@ -1497,7 +1497,367 @@ Instructions:
       window.addEventListener('workbench:prompts-updated', () => {
         renderPrompts();
         updateMetricsAndCounters();
+        if (window.WorkbenchInjector) {
+          window.WorkbenchInjector.populatePromptDropdown();
+        }
       });
+
+      // ==========================================
+      // STAGE 3: DYNAMIC VARIABLE INJECTOR ENGINE
+      // ==========================================
+      const PresetStore = {
+        getAll() {
+          try {
+            const raw = localStorage.getItem(STORAGE_KEYS.PRESETS);
+            if (!raw) return [];
+            const parsed = JSON.parse(raw);
+            return Array.isArray(parsed) ? parsed : [];
+          } catch (e) {
+            console.error('Failed to parse presets:', e);
+            return [];
+          }
+        },
+
+        getByPromptId(promptId) {
+          return this.getAll().filter(p => p.promptId === promptId);
+        },
+
+        save(promptId, name, values) {
+          const all = this.getAll();
+          const newPreset = {
+            id: 'preset_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6),
+            promptId,
+            name: name.trim() || 'Untitled Preset',
+            values: { ...values },
+            createdAt: new Date().toISOString()
+          };
+          all.push(newPreset);
+          try {
+            localStorage.setItem(STORAGE_KEYS.PRESETS, JSON.stringify(all));
+            updateMetricsAndCounters();
+            showToast(`Preset "${newPreset.name}" saved!`, 'success');
+            return newPreset;
+          } catch (e) {
+            showToast('Failed to save preset to local storage.', 'error');
+            return null;
+          }
+        },
+
+        delete(presetId) {
+          const all = this.getAll().filter(p => p.id !== presetId);
+          try {
+            localStorage.setItem(STORAGE_KEYS.PRESETS, JSON.stringify(all));
+            updateMetricsAndCounters();
+            showToast('Preset deleted.', 'info');
+            return true;
+          } catch (e) {
+            return false;
+          }
+        }
+      };
+
+      window.WorkbenchPresets = PresetStore;
+
+      // Common helper suggestions for frequent template variables
+      const VARIABLE_PRESETS = {
+        LANGUAGE: ['TypeScript', 'JavaScript', 'Python', 'Rust', 'Go', 'Java', 'Dart', 'C++'],
+        FRAMEWORK: ['React', 'Next.js', 'Tailwind CSS', 'FastAPI', 'Flutter', 'Node.js', 'Vue.js'],
+        OUTPUT_FORMAT: ['Markdown', 'JSON', 'Code-only', 'Structured Report'],
+        SCALE_GOAL: ['10k DAU', '100k DAU', '1M DAU', '10,000 req/sec', 'Enterprise High-Availability'],
+        COLOR_THEME: ['Dark Slate / Indigo Accent', 'Zinc / Emerald Accent', 'High-Contrast Dark Mode', 'Modern Minimalist Light/Dark']
+      };
+
+      // Variable Injector Controller
+      const InjectorController = {
+        currentPromptId: null,
+        currentValues: {},
+
+        init() {
+          this.promptSelect = document.getElementById('injector-prompt-select');
+          this.formContainer = document.getElementById('dynamic-variables-form');
+          this.previewContainer = document.getElementById('live-prompt-preview');
+          this.varsCountBadge = document.getElementById('detected-vars-count');
+          this.unresolvedBadge = document.getElementById('preview-unresolved-badge');
+          this.copyBtn = document.getElementById('copy-final-prompt-btn');
+          this.sendDiffBtn = document.getElementById('send-to-diff-btn');
+          this.savePresetBtn = document.getElementById('save-preset-btn');
+          this.loadPresetSelect = document.getElementById('load-preset-select');
+
+          // Metrics elements
+          this.metricChars = document.getElementById('metric-chars');
+          this.metricWords = document.getElementById('metric-words');
+          this.metricLines = document.getElementById('metric-lines');
+          this.metricTokens = document.getElementById('metric-tokens');
+
+          this.bindEvents();
+          this.populatePromptDropdown();
+        },
+
+        bindEvents() {
+          if (this.promptSelect) {
+            this.promptSelect.addEventListener('change', (e) => {
+              this.loadPrompt(e.target.value);
+            });
+          }
+
+          if (this.copyBtn) {
+            this.copyBtn.addEventListener('click', () => {
+              const text = this.getFinalSubstitutedText();
+              copyTextToClipboard(text, 'Final substituted prompt copied to clipboard!');
+            });
+          }
+
+          if (this.sendDiffBtn) {
+            this.sendDiffBtn.addEventListener('click', () => {
+              const text = this.getFinalSubstitutedText();
+              if (!text.trim()) {
+                showToast('No prompt content to transfer.', 'warning');
+                return;
+              }
+
+              // Transfer to diff inspector
+              const diffModInput = document.getElementById('diff-mod-input');
+              const diffOrigInput = document.getElementById('diff-orig-input');
+
+              // If diffOrig is empty and diffMod has content, or vice versa, offer smart placement
+              if (diffModInput) {
+                diffModInput.value = text;
+                diffModInput.dispatchEvent(new Event('input'));
+              }
+
+              showToast('Prompt output sent to Diff Inspector (Modified Code).', 'success');
+              WorkbenchNav.switchView('diff');
+            });
+          }
+
+          if (this.savePresetBtn) {
+            this.savePresetBtn.addEventListener('click', () => {
+              if (!this.currentPromptId) {
+                showToast('Please select a prompt template first.', 'warning');
+                return;
+              }
+              const presetName = prompt('Enter a name for this variable preset:');
+              if (presetName && presetName.trim()) {
+                PresetStore.save(this.currentPromptId, presetName.trim(), this.currentValues);
+                this.updatePresetDropdown();
+              }
+            });
+          }
+
+          if (this.loadPresetSelect) {
+            this.loadPresetSelect.addEventListener('change', (e) => {
+              const presetId = e.target.value;
+              if (!presetId) return;
+              const allPresets = PresetStore.getByPromptId(this.currentPromptId);
+              const selected = allPresets.find(p => p.id === presetId);
+              if (selected && selected.values) {
+                this.applyPresetValues(selected.values);
+                showToast(`Applied preset: "${selected.name}"`, 'info');
+              }
+            });
+          }
+        },
+
+        populatePromptDropdown() {
+          if (!this.promptSelect) return;
+          const prompts = PromptStore.getAll();
+          const previousSelected = this.currentPromptId || (prompts.length > 0 ? prompts[0].id : null);
+
+          this.promptSelect.innerHTML = prompts.map(p => {
+            return `<option value="${p.id}">${escapeHtml(p.title)}</option>`;
+          }).join('');
+
+          if (prompts.length > 0) {
+            const targetId = prompts.some(p => p.id === previousSelected) ? previousSelected : prompts[0].id;
+            this.promptSelect.value = targetId;
+            this.loadPrompt(targetId);
+          } else {
+            this.currentPromptId = null;
+            this.formContainer.innerHTML = '<div class="text-center py-8 text-xs text-slate-500 italic">No prompts available. Create one in the Prompt Library.</div>';
+            this.previewContainer.textContent = '';
+            this.updateMetrics('');
+          }
+        },
+
+        loadPrompt(promptId) {
+          this.currentPromptId = promptId;
+          const prompt = PromptStore.getById(promptId);
+          if (!prompt) return;
+
+          const variables = extractVariables(prompt.body);
+          if (this.varsCountBadge) this.varsCountBadge.textContent = variables.length;
+
+          // Preserve any existing matching values, reset remainder
+          const newValues = {};
+          variables.forEach(v => {
+            newValues[v] = this.currentValues[v] || '';
+          });
+          this.currentValues = newValues;
+
+          this.renderForm(variables);
+          this.updatePresetDropdown();
+          this.updateLivePreview();
+        },
+
+        updatePresetDropdown() {
+          if (!this.loadPresetSelect || !this.currentPromptId) return;
+          const presets = PresetStore.getByPromptId(this.currentPromptId);
+          if (presets.length === 0) {
+            this.loadPresetSelect.innerHTML = '<option value="">No presets saved</option>';
+            this.loadPresetSelect.disabled = true;
+          } else {
+            this.loadPresetSelect.disabled = false;
+            this.loadPresetSelect.innerHTML = '<option value="">Load Preset...</option>' +
+              presets.map(p => `<option value="${p.id}">${escapeHtml(p.name)}</option>`).join('');
+          }
+        },
+
+        applyPresetValues(values) {
+          Object.keys(values).forEach(varName => {
+            this.currentValues[varName] = values[varName];
+            const input = document.getElementById(`var-input-${varName}`);
+            if (input) {
+              input.value = values[varName];
+            }
+          });
+          this.updateLivePreview();
+        },
+
+        renderForm(variables) {
+          if (!this.formContainer) return;
+
+          if (variables.length === 0) {
+            this.formContainer.innerHTML = `
+              <div class="text-center py-8 px-4 rounded-lg bg-slate-900/50 border border-slate-800/80">
+                <i class="fa-solid fa-circle-check text-indigo-400 text-lg mb-2"></i>
+                <p class="text-xs text-slate-300 font-medium">Static Template</p>
+                <p class="text-[11px] text-slate-500 mt-1">This prompt template has no <code class="text-indigo-400 font-mono">{{VARIABLE}}</code> tags.</p>
+              </div>
+            `;
+            return;
+          }
+
+          this.formContainer.innerHTML = variables.map(varName => {
+            const isMultiline = /code|spec|requirements|areas|log|behavior|context|body|input|data|file/i.test(varName);
+            const presets = VARIABLE_PRESETS[varName.toUpperCase()] || null;
+            const currentValue = this.currentValues[varName] || '';
+
+            return `
+              <div class="p-3 rounded-lg bg-slate-900/80 border border-slate-800 space-y-1.5 focus-within:border-indigo-500/60 transition-colors">
+                <div class="flex items-center justify-between">
+                  <label for="var-input-${varName}" class="text-xs font-mono font-semibold text-indigo-300 flex items-center gap-1.5">
+                    <span>{{${escapeHtml(varName)}}}</span>
+                  </label>
+                  <span class="text-[10px] text-slate-500 uppercase font-mono">${isMultiline ? 'multiline' : 'text'}</span>
+                </div>
+
+                ${isMultiline ? `
+                  <textarea id="var-input-${varName}" data-var="${escapeHtml(varName)}" rows="3" placeholder="Enter value for {{${escapeHtml(varName)}}}..." class="var-field w-full px-2.5 py-1.5 rounded bg-slate-950 border border-slate-800 text-xs text-slate-100 font-mono focus:outline-none focus:border-indigo-500 resize-y leading-relaxed">${escapeHtml(currentValue)}</textarea>
+                ` : `
+                  <input type="text" id="var-input-${varName}" data-var="${escapeHtml(varName)}" value="${escapeHtml(currentValue)}" placeholder="Enter value for {{${escapeHtml(varName)}}}..." class="var-field w-full px-2.5 py-1.5 rounded bg-slate-950 border border-slate-800 text-xs text-slate-100 font-mono focus:outline-none focus:border-indigo-500">
+                `}
+
+                ${presets ? `
+                  <div class="flex items-center gap-1.5 flex-wrap pt-1">
+                    <span class="text-[10px] text-slate-500">Suggestions:</span>
+                    ${presets.map(p => `<button type="button" class="preset-chip text-[10px] px-1.5 py-0.5 rounded bg-slate-800 hover:bg-indigo-600/30 text-slate-300 hover:text-indigo-200 border border-slate-700/80 transition-colors font-mono" data-var="${escapeHtml(varName)}" data-value="${escapeHtml(p)}">${escapeHtml(p)}</button>`).join('')}
+                  </div>
+                ` : ''}
+              </div>
+            `;
+          }).join('');
+
+          // Bind input changes
+          this.formContainer.querySelectorAll('.var-field').forEach(field => {
+            field.addEventListener('input', (e) => {
+              const varName = e.target.getAttribute('data-var');
+              this.currentValues[varName] = e.target.value;
+              this.updateLivePreview();
+            });
+          });
+
+          // Bind quick suggestion chips
+          this.formContainer.querySelectorAll('.preset-chip').forEach(chip => {
+            chip.addEventListener('click', (e) => {
+              const varName = chip.getAttribute('data-var');
+              const value = chip.getAttribute('data-value');
+              const input = document.getElementById(`var-input-${varName}`);
+              if (input) {
+                input.value = value;
+                this.currentValues[varName] = value;
+                this.updateLivePreview();
+              }
+            });
+          });
+        },
+
+        getFinalSubstitutedText() {
+          const prompt = PromptStore.getById(this.currentPromptId);
+          if (!prompt) return '';
+
+          let result = prompt.body;
+          const regex = /\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}/g;
+
+          result = result.replace(regex, (match, varName) => {
+            const val = this.currentValues[varName];
+            if (val !== undefined && val !== null && String(val).trim().length > 0) {
+              return String(val);
+            }
+            return match; // Preserve placeholder if unresolved
+          });
+
+          return result;
+        },
+
+        updateLivePreview() {
+          const prompt = PromptStore.getById(this.currentPromptId);
+          if (!prompt) {
+            if (this.previewContainer) this.previewContainer.textContent = '';
+            this.updateMetrics('');
+            return;
+          }
+
+          let unresolvedCount = 0;
+          const text = this.getFinalSubstitutedText();
+
+          // Check unresolved count
+          const regex = /\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}/g;
+          const remainingMatches = text.match(regex);
+          if (remainingMatches) {
+            unresolvedCount = new Set(remainingMatches).size;
+          }
+
+          if (this.unresolvedBadge) {
+            if (unresolvedCount > 0) {
+              this.unresolvedBadge.textContent = `${unresolvedCount} Unresolved Var${unresolvedCount > 1 ? 's' : ''}`;
+              this.unresolvedBadge.classList.remove('hidden');
+            } else {
+              this.unresolvedBadge.classList.add('hidden');
+            }
+          }
+
+          if (this.previewContainer) {
+            this.previewContainer.textContent = text;
+          }
+
+          this.updateMetrics(text);
+        },
+
+        updateMetrics(text) {
+          const str = text || '';
+          const chars = str.length;
+          const words = str.trim() ? str.trim().split(/\s+/).length : 0;
+          const lines = str ? str.split('\n').length : 0;
+          const estimatedTokens = Math.round(chars / 4);
+
+          if (this.metricChars) this.metricChars.textContent = chars.toLocaleString();
+          if (this.metricWords) this.metricWords.textContent = words.toLocaleString();
+          if (this.metricLines) this.metricLines.textContent = lines.toLocaleString();
+          if (this.metricTokens) this.metricTokens.textContent = `~${estimatedTokens.toLocaleString()}`;
+        }
+      };
+
+      window.WorkbenchInjector = InjectorController;
 
       // --- NAVIGATION CONTROLLER ---
       function switchView(viewName) {
@@ -1583,6 +1943,7 @@ Instructions:
         checkStorageStatus();
         PromptStore.initDefaults();
         renderPrompts();
+        InjectorController.init();
         updateMetricsAndCounters();
         switchView('library');
       });

@@ -755,7 +755,134 @@
     (function () {
       'use strict';
 
-      // --- STATE & CONSTANTS ---
+      // ==========================================
+      // CONSTANTS & DEFAULT DATA
+      // ==========================================
+      const STORAGE_KEYS = {
+        PROMPTS: 'workbench_prompts',
+        PRESETS: 'workbench_presets',
+        SETTINGS: 'workbench_settings'
+      };
+
+      const DEFAULT_TEMPLATES = [
+        {
+          id: 'prompt_seed_code_audit',
+          title: 'Code Reviewer & Security Auditor',
+          description: 'Rigorous audit for OWASP vulnerabilities, performance bottlenecks, race conditions, and clean code refactoring.',
+          category: 'security',
+          tags: ['security', 'code-review', 'owasp', 'audit', 'quality'],
+          body: `You are a Principal Security Engineer and Senior Code Auditor specializing in {{LANGUAGE}}.
+Your objective is to conduct an uncompromising, comprehensive security and quality audit of the following code.
+
+Review the implementation specifically against:
+1. Critical Vulnerabilities: OWASP Top 10, injection risks, memory safety, race conditions, auth bypasses, and data leaks.
+2. Logic & Correctness: Flawed invariants, unhandled edge cases, incorrect exception handling, off-by-one errors.
+3. Performance & Memory: Big-O bottlenecks, unbounded collections, connection leaks, unclosed resources.
+4. Maintainability: Clean architecture, modularity, type safety, and testability.
+
+Focus Areas Requested by User:
+{{FOCUS_AREAS}}
+
+Target Code to Audit:
+\`\`\`{{LANGUAGE}}
+{{CODE}}
+\`\`\`
+
+Provide your audit in the following format:
+- **Executive Summary:** Overall risk posture (Low / Medium / High / Critical) and key findings.
+- **Detailed Vulnerability & Bug Breakdown:** For each issue found, state severity, exact location, root cause, proof of concept scenario, and recommended fix.
+- **Refactored Code Patch:** Complete, secure, drop-in replacement implementation.
+- **Automated Test Scenarios:** Specific unit/integration test cases to prevent future regressions.`,
+          createdAt: '2026-01-15T08:00:00.000Z',
+          updatedAt: '2026-01-15T08:00:00.000Z'
+        },
+        {
+          id: 'prompt_seed_arch_spec',
+          title: 'System Architecture Spec Generator',
+          description: 'Transforms requirements into component topologies, data models, API contracts, scale strategies, and risk profiles.',
+          category: 'architecture',
+          tags: ['architecture', 'system-design', 'spec', 'api-contract', 'scalability'],
+          body: `You are a Principal Enterprise Systems Architect. Your mission is to transform high-level requirements for {{SYSTEM_NAME}} into a production-grade Technical Architecture Specification.
+
+Context & Scope:
+- System Name: {{SYSTEM_NAME}}
+- Primary Requirements: {{REQUIREMENTS}}
+- Target Technology Stack: {{TECH_STACK}}
+- Scale & Throughput Target: {{SCALE_GOAL}}
+
+Generate a comprehensive specification with the following sections:
+1. **System Overview & Domain Model:** Core entities, state machines, and business domain boundaries.
+2. **Component Architecture:** High-level topology diagram (described in Mermaid), service boundaries, message brokers, and persistence layers.
+3. **Data Model & Schema:** Relational/document schemas, indexing strategy, partition keys, and migration strategy.
+4. **API Contracts:** REST/gRPC endpoints with exact request/response payloads, authentication, and status codes.
+5. **Reliability & Scalability Engineering:** Caching strategy, circuit breaking, failover mechanism, horizontal autoscaling thresholds.
+6. **Security & Compliance:** Threat vectors, data encryption at rest and in transit, RBAC model.
+7. **Implementation Roadmap:** Phased milestones with explicit dependency sequencing and risks.`,
+          createdAt: '2026-01-15T08:30:00.000Z',
+          updatedAt: '2026-01-15T08:30:00.000Z'
+        },
+        {
+          id: 'prompt_seed_tailwind_ui',
+          title: 'Tailwind CSS & UI Component Designer',
+          description: 'Generates responsive, accessible, beautifully styled Tailwind components with interactive states and WCAG compliance.',
+          category: 'ui',
+          tags: ['ui', 'tailwind-css', 'components', 'accessibility', 'frontend'],
+          body: `You are a Staff Frontend UI/UX Architect and Design Systems Specialist.
+Design an accessible, responsive, modern UI component called {{COMPONENT_NAME}} using {{FRAMEWORK}} and Tailwind CSS.
+
+Component Requirements:
+- Component: {{COMPONENT_NAME}}
+- Target Framework: {{FRAMEWORK}}
+- Functional & Aesthetic Requirements: {{DESIGN_REQUIREMENTS}}
+- Theme & Color Palette: {{COLOR_THEME}}
+
+Mandatory Design Criteria:
+1. Complete Tailwind CSS Utility Classes: No ad-hoc style tags or arbitrary magic numbers unless justified.
+2. Full Accessibility (a11y): WCAG 2.1 AA compliance, ARIA attributes, semantic markup, keyboard focus traps/rings, screen-reader support.
+3. Component States: Default, hover, active, focused, disabled, loading, and error states.
+4. Responsive Breakpoints: Pixel-perfect ergonomics across mobile (default), tablet (md:), and desktop (lg:, xl:).
+5. Dark Mode Compatibility: Coherent contrast in both light and dark modes.
+
+Output format:
+- Component documentation with props interface.
+- Complete copy-pasteable component source code.
+- Interactive state demo showing all states.`,
+          createdAt: '2026-01-15T09:00:00.000Z',
+          updatedAt: '2026-01-15T09:00:00.000Z'
+        },
+        {
+          id: 'prompt_seed_bug_hunter',
+          title: 'Bug Hunter & Refactoring Agent',
+          description: 'Isolates root causes from error traces, produces minimal surgical fixes, clean refactorings, and regression tests.',
+          category: 'debugging',
+          tags: ['debugging', 'refactoring', 'root-cause', 'clean-code', 'testing'],
+          body: `You are an expert Debugging Specialist and Clean Code Refactoring Engineer.
+Investigate the following bug in {{LANGUAGE}}, isolate the root cause, and provide a minimal, non-breaking fix along with regression tests.
+
+Context:
+- Language & Environment: {{LANGUAGE}}
+- Expected Behavior: {{EXPECTED_BEHAVIOR}}
+
+Error Trace / Logs:
+\`\`\`
+{{ERROR_LOG}}
+\`\`\`
+
+Problematic Source Code:
+\`\`\`{{LANGUAGE}}
+{{SOURCE_CODE}}
+\`\`\`
+
+Instructions:
+1. **Root Cause Analysis:** Explain clearly why the failure occurs, including any timing, environmental, or typing assumptions that fail.
+2. **Minimal Safe Fix:** Provide the surgical change necessary to resolve the issue with zero collateral side effects.
+3. **Clean Refactoring:** If the code exhibits anti-patterns, offer a clean, idiomatic refactoring that improves readability and maintainability.
+4. **Regression Unit Tests:** Provide targeted unit tests that fail on the original buggy code and pass on the fixed version.`,
+          createdAt: '2026-01-15T09:30:00.000Z',
+          updatedAt: '2026-01-15T09:30:00.000Z'
+        }
+      ];
+
       const VIEWS = {
         library: {
           title: 'Prompt Library',
@@ -776,6 +903,8 @@
       };
 
       let activeView = 'library';
+      let activeCategoryFilter = 'all';
+      let currentSearchQuery = '';
 
       // --- UI ELEMENT REFS ---
       const sidebar = document.getElementById('app-sidebar');
@@ -787,6 +916,30 @@
       const navButtons = document.querySelectorAll('.nav-item');
       const viewPanels = document.querySelectorAll('.view-panel');
       const toastContainer = document.getElementById('toast-container');
+
+      // Library Element Refs
+      const promptsGrid = document.getElementById('prompts-grid');
+      const promptsEmptyState = document.getElementById('prompts-empty-state');
+      const promptSearchInput = document.getElementById('prompt-search-input');
+      const promptSearchClear = document.getElementById('prompt-search-clear');
+      const tagFilterButtons = document.querySelectorAll('.tag-filter-btn');
+      const newPromptBtn = document.getElementById('new-prompt-btn');
+      const emptyCreatePromptBtn = document.getElementById('empty-create-prompt-btn');
+      const navCountPrompts = document.getElementById('nav-count-prompts');
+      const libraryCountBadge = document.getElementById('library-count-badge');
+
+      // Prompt Modal Refs
+      const promptModal = document.getElementById('prompt-modal');
+      const promptModalClose = document.getElementById('prompt-modal-close');
+      const promptModalCancel = document.getElementById('prompt-modal-cancel');
+      const promptForm = document.getElementById('prompt-form');
+      const promptModalTitle = document.getElementById('prompt-modal-title');
+      const promptIdInput = document.getElementById('prompt-id');
+      const promptTitleInput = document.getElementById('prompt-title-input');
+      const promptDescInput = document.getElementById('prompt-desc-input');
+      const promptCategoryInput = document.getElementById('prompt-category-input');
+      const promptTagsInput = document.getElementById('prompt-tags-input');
+      const promptBodyInput = document.getElementById('prompt-body-input');
 
       // --- TOAST NOTIFICATION ENGINE ---
       function showToast(message, type = 'info', duration = 3000) {
@@ -825,8 +978,526 @@
         }, duration);
       }
 
-      // Expose globally for workbench modules
       window.WorkbenchToast = { show: showToast };
+
+      // --- SAFE CLIPBOARD COPY HELPER ---
+      async function copyTextToClipboard(text, successMessage = 'Copied to clipboard!') {
+        if (!text) {
+          showToast('Nothing to copy', 'warning');
+          return false;
+        }
+
+        try {
+          if (navigator.clipboard && window.isSecureContext) {
+            await navigator.clipboard.writeText(text);
+            showToast(successMessage, 'success');
+            return true;
+          }
+        } catch (err) {
+          console.warn('Navigator clipboard failed, trying fallback:', err);
+        }
+
+        // Fallback for non-secure contexts or permission restrictions
+        try {
+          const textArea = document.createElement('textarea');
+          textArea.value = text;
+          textArea.style.position = 'fixed';
+          textArea.style.left = '-999999px';
+          textArea.style.top = '-999999px';
+          document.body.appendChild(textArea);
+          textArea.focus();
+          textArea.select();
+          const successful = document.execCommand('copy');
+          document.body.removeChild(textArea);
+          if (successful) {
+            showToast(successMessage, 'success');
+            return true;
+          }
+        } catch (fallbackErr) {
+          console.error('Fallback copy failed:', fallbackErr);
+        }
+
+        showToast('Unable to copy automatically. Please select and copy manually.', 'error');
+        return false;
+      }
+
+      window.WorkbenchClipboard = { copy: copyTextToClipboard };
+
+      // ==========================================
+      // PROMPT DATA MANAGEMENT ENGINE (CRUD)
+      // ==========================================
+      const PromptStore = {
+        getAll() {
+          try {
+            const raw = localStorage.getItem(STORAGE_KEYS.PROMPTS);
+            if (!raw) return [];
+            const parsed = JSON.parse(raw);
+            return Array.isArray(parsed) ? parsed : [];
+          } catch (e) {
+            console.error('Failed to parse prompts from localStorage:', e);
+            showToast('Storage read error: malformed prompt records.', 'error');
+            return [];
+          }
+        },
+
+        getById(id) {
+          const all = this.getAll();
+          return all.find(p => p.id === id) || null;
+        },
+
+        saveAll(prompts) {
+          try {
+            localStorage.setItem(STORAGE_KEYS.PROMPTS, JSON.stringify(prompts));
+            updateMetricsAndCounters();
+            return true;
+          } catch (e) {
+            console.error('Failed to save prompts to localStorage:', e);
+            if (e.name === 'QuotaExceededError' || e.code === 22) {
+              showToast('Storage quota exceeded! Cannot save prompt.', 'error');
+            } else {
+              showToast('Failed to save prompts to local storage.', 'error');
+            }
+            return false;
+          }
+        },
+
+        save(promptData) {
+          const all = this.getAll();
+          const now = new Date().toISOString();
+
+          if (promptData.id) {
+            // Update existing
+            const index = all.findIndex(p => p.id === promptData.id);
+            if (index !== -1) {
+              all[index] = {
+                ...all[index],
+                ...promptData,
+                updatedAt: now
+              };
+            } else {
+              // ID provided but not found, treat as new
+              all.unshift({
+                ...promptData,
+                createdAt: now,
+                updatedAt: now
+              });
+            }
+          } else {
+            // Create brand new
+            const newPrompt = {
+              ...promptData,
+              id: 'prompt_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6),
+              createdAt: now,
+              updatedAt: now
+            };
+            all.unshift(newPrompt);
+          }
+
+          const success = this.saveAll(all);
+          if (success) {
+            window.dispatchEvent(new CustomEvent('workbench:prompts-updated'));
+          }
+          return success;
+        },
+
+        duplicate(id) {
+          const original = this.getById(id);
+          if (!original) {
+            showToast('Prompt not found to duplicate.', 'error');
+            return null;
+          }
+
+          const copy = {
+            title: `${original.title} (Copy)`,
+            description: original.description,
+            category: original.category || 'general',
+            tags: Array.isArray(original.tags) ? [...original.tags] : [],
+            body: original.body
+          };
+
+          if (this.save(copy)) {
+            showToast(`Duplicated "${original.title}"`, 'success');
+            return true;
+          }
+          return false;
+        },
+
+        delete(id) {
+          const all = this.getAll();
+          const target = all.find(p => p.id === id);
+          if (!target) return false;
+
+          const filtered = all.filter(p => p.id !== id);
+          const success = this.saveAll(filtered);
+          if (success) {
+            showToast(`Deleted prompt "${target.title}"`, 'info');
+            window.dispatchEvent(new CustomEvent('workbench:prompts-updated'));
+          }
+          return success;
+        },
+
+        initDefaults() {
+          const raw = localStorage.getItem(STORAGE_KEYS.PROMPTS);
+          if (!raw || raw === '[]' || raw === 'null') {
+            console.log('Seeding initial default prompt templates...');
+            this.saveAll(DEFAULT_TEMPLATES);
+          }
+        },
+
+        resetToDefaults() {
+          this.saveAll(DEFAULT_TEMPLATES);
+          showToast('Reset prompt library to default templates.', 'success');
+          window.dispatchEvent(new CustomEvent('workbench:prompts-updated'));
+        }
+      };
+
+      window.WorkbenchPrompts = PromptStore;
+
+      // Extract unique variable names from prompt body (matches {{VARIABLE_NAME}})
+      function extractVariables(text) {
+        if (!text || typeof text !== 'string') return [];
+        const regex = /\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}/g;
+        const matches = new Set();
+        let match;
+        while ((match = regex.exec(text)) !== null) {
+          matches.add(match[1]);
+        }
+        return Array.from(matches);
+      }
+
+      window.WorkbenchExtractVariables = extractVariables;
+
+      // Category badge styling helper
+      function getCategoryBadge(category) {
+        const cat = (category || 'general').toLowerCase();
+        const colors = {
+          coding: 'bg-blue-500/10 text-blue-400 border-blue-500/20',
+          architecture: 'bg-purple-500/10 text-purple-400 border-purple-500/20',
+          ui: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
+          debugging: 'bg-rose-500/10 text-rose-400 border-rose-500/20',
+          security: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
+          general: 'bg-slate-500/10 text-slate-400 border-slate-500/20'
+        };
+        const colorClass = colors[cat] || colors.general;
+        return `<span class="text-[10px] uppercase font-semibold px-2 py-0.5 rounded-full border ${colorClass}">${escapeHtml(cat)}</span>`;
+      }
+
+      function escapeHtml(str) {
+        if (!str) return '';
+        return String(str)
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+          .replace(/'/g, '&#039;');
+      }
+
+      // Render Prompt Library Grid Cards
+      function renderPrompts() {
+        const allPrompts = PromptStore.getAll();
+        const query = currentSearchQuery.trim().toLowerCase();
+
+        const filtered = allPrompts.filter(prompt => {
+          // Category filter
+          if (activeCategoryFilter !== 'all') {
+            const promptCat = (prompt.category || '').toLowerCase();
+            const tags = Array.isArray(prompt.tags) ? prompt.tags.map(t => t.toLowerCase()) : [];
+            const matchesCategory = promptCat === activeCategoryFilter || tags.includes(activeCategoryFilter);
+            if (!matchesCategory) return false;
+          }
+
+          // Search query filter
+          if (query) {
+            const inTitle = (prompt.title || '').toLowerCase().includes(query);
+            const inDesc = (prompt.description || '').toLowerCase().includes(query);
+            const inBody = (prompt.body || '').toLowerCase().includes(query);
+            const inTags = Array.isArray(prompt.tags) && prompt.tags.some(t => t.toLowerCase().includes(query));
+            return inTitle || inDesc || inBody || inTags;
+          }
+
+          return true;
+        });
+
+        // Update Counter Badges
+        if (navCountPrompts) navCountPrompts.textContent = allPrompts.length;
+        if (libraryCountBadge) {
+          libraryCountBadge.textContent = `${filtered.length} of ${allPrompts.length} template${allPrompts.length === 1 ? '' : 's'}`;
+        }
+
+        // Handle Empty State
+        if (filtered.length === 0) {
+          promptsGrid.innerHTML = '';
+          promptsEmptyState.classList.remove('hidden');
+          return;
+        }
+
+        promptsEmptyState.classList.add('hidden');
+
+        promptsGrid.innerHTML = filtered.map(prompt => {
+          const vars = extractVariables(prompt.body);
+          const varCount = vars.length;
+          const tags = Array.isArray(prompt.tags) ? prompt.tags : [];
+
+          return `
+            <div class="rounded-xl border border-slate-800 bg-[#0c1220] hover:border-slate-700/80 p-5 flex flex-col justify-between transition-all group shadow-sm hover:shadow-md hover:shadow-indigo-500/5" data-id="${prompt.id}">
+              
+              <!-- Card Top -->
+              <div>
+                <div class="flex items-start justify-between gap-3 mb-2.5">
+                  <div class="flex items-center gap-2 flex-wrap">
+                    ${getCategoryBadge(prompt.category)}
+                    ${varCount > 0 ? `<span class="text-[10px] font-mono px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-300 border border-indigo-500/20" title="${escapeHtml(vars.join(', '))}"><i class="fa-solid fa-code text-[9px] mr-1"></i>${varCount} var${varCount > 1 ? 's' : ''}</span>` : ''}
+                  </div>
+                  
+                  <!-- Quick Card Menu -->
+                  <div class="flex items-center gap-1 opacity-80 group-hover:opacity-100 transition-opacity">
+                    <button class="btn-copy-prompt text-slate-400 hover:text-white p-1.5 rounded hover:bg-slate-800 transition-colors" title="Copy prompt body">
+                      <i class="fa-solid fa-copy text-xs"></i>
+                    </button>
+                    <button class="btn-edit-prompt text-slate-400 hover:text-white p-1.5 rounded hover:bg-slate-800 transition-colors" title="Edit prompt">
+                      <i class="fa-solid fa-pen-to-square text-xs"></i>
+                    </button>
+                    <button class="btn-dup-prompt text-slate-400 hover:text-white p-1.5 rounded hover:bg-slate-800 transition-colors" title="Duplicate prompt">
+                      <i class="fa-solid fa-clone text-xs"></i>
+                    </button>
+                    <button class="btn-delete-prompt text-slate-400 hover:text-rose-400 p-1.5 rounded hover:bg-slate-800 transition-colors" title="Delete prompt">
+                      <i class="fa-solid fa-trash-can text-xs"></i>
+                    </button>
+                  </div>
+                </div>
+
+                <h4 class="text-sm font-bold text-white tracking-tight line-clamp-1 group-hover:text-indigo-300 transition-colors">${escapeHtml(prompt.title)}</h4>
+                <p class="text-xs text-slate-400 mt-1 line-clamp-2 leading-relaxed">${escapeHtml(prompt.description)}</p>
+
+                <!-- Tags list -->
+                ${tags.length > 0 ? `
+                  <div class="flex flex-wrap gap-1.5 mt-3">
+                    ${tags.map(tag => `<span class="text-[10px] text-slate-400 bg-slate-900/90 px-2 py-0.5 rounded border border-slate-800 font-mono">#${escapeHtml(tag.trim())}</span>`).join('')}
+                  </div>
+                ` : ''}
+              </div>
+
+              <!-- Card Bottom Action -->
+              <div class="pt-4 mt-4 border-t border-slate-800/80 flex items-center justify-between text-xs">
+                <span class="text-[11px] text-slate-500 font-mono">
+                  ${prompt.updatedAt ? new Date(prompt.updatedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : 'Ready'}
+                </span>
+                
+                <button class="btn-use-template inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600/15 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/30 font-medium text-xs transition-colors">
+                  <span>Use in Injector</span>
+                  <i class="fa-solid fa-arrow-right text-[10px]"></i>
+                </button>
+              </div>
+
+            </div>
+          `;
+        }).join('');
+
+        // Bind Card Event Listeners
+        promptsGrid.querySelectorAll('.rounded-xl[data-id]').forEach(card => {
+          const id = card.getAttribute('data-id');
+          const prompt = PromptStore.getById(id);
+          if (!prompt) return;
+
+          // Copy Button
+          const copyBtn = card.querySelector('.btn-copy-prompt');
+          if (copyBtn) {
+            copyBtn.addEventListener('click', (e) => {
+              e.stopPropagation();
+              copyTextToClipboard(prompt.body, `Copied "${prompt.title}" to clipboard!`);
+            });
+          }
+
+          // Edit Button
+          const editBtn = card.querySelector('.btn-edit-prompt');
+          if (editBtn) {
+            editBtn.addEventListener('click', (e) => {
+              e.stopPropagation();
+              openPromptModal(prompt);
+            });
+          }
+
+          // Duplicate Button
+          const dupBtn = card.querySelector('.btn-dup-prompt');
+          if (dupBtn) {
+            dupBtn.addEventListener('click', (e) => {
+              e.stopPropagation();
+              PromptStore.duplicate(id);
+            });
+          }
+
+          // Delete Button
+          const delBtn = card.querySelector('.btn-delete-prompt');
+          if (delBtn) {
+            delBtn.addEventListener('click', (e) => {
+              e.stopPropagation();
+              if (confirm(`Are you sure you want to delete "${prompt.title}"? This cannot be undone.`)) {
+                PromptStore.delete(id);
+              }
+            });
+          }
+
+          // "Use in Injector" Button
+          const useBtn = card.querySelector('.btn-use-template');
+          if (useBtn) {
+            useBtn.addEventListener('click', (e) => {
+              e.stopPropagation();
+              switchView('injector');
+              // Select prompt in injector view
+              const injectorSelect = document.getElementById('injector-prompt-select');
+              if (injectorSelect) {
+                injectorSelect.value = id;
+                injectorSelect.dispatchEvent(new Event('change'));
+              }
+            });
+          }
+        });
+      }
+
+      // Update Local Storage diagnostics in settings
+      function updateMetricsAndCounters() {
+        const allPrompts = PromptStore.getAll();
+        if (navCountPrompts) navCountPrompts.textContent = allPrompts.length;
+        
+        const storageBytesMetric = document.getElementById('storage-bytes-metric');
+        if (storageBytesMetric) {
+          try {
+            const rawPrompts = localStorage.getItem(STORAGE_KEYS.PROMPTS) || '';
+            const rawPresets = localStorage.getItem(STORAGE_KEYS.PRESETS) || '';
+            const totalBytes = (rawPrompts.length + rawPresets.length) * 2; // UTF-16 approx
+            const kb = (totalBytes / 1024).toFixed(2);
+            storageBytesMetric.textContent = `${kb} KB (${allPrompts.length} prompts stored)`;
+          } catch (e) {
+            storageBytesMetric.textContent = 'Unknown';
+          }
+        }
+      }
+
+      // Modal Handlers
+      function openPromptModal(prompt = null) {
+        promptForm.reset();
+        if (prompt) {
+          promptModalTitle.textContent = 'Edit Prompt Template';
+          promptIdInput.value = prompt.id || '';
+          promptTitleInput.value = prompt.title || '';
+          promptDescInput.value = prompt.description || '';
+          promptCategoryInput.value = prompt.category || 'coding';
+          promptTagsInput.value = Array.isArray(prompt.tags) ? prompt.tags.join(', ') : '';
+          promptBodyInput.value = prompt.body || '';
+        } else {
+          promptModalTitle.textContent = 'Create Prompt Template';
+          promptIdInput.value = '';
+          promptCategoryInput.value = 'coding';
+        }
+        promptModal.classList.remove('hidden');
+        promptTitleInput.focus();
+      }
+
+      function closePromptModal() {
+        promptModal.classList.add('hidden');
+      }
+
+      // Prompt Form Submit Handler
+      promptForm.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const title = promptTitleInput.value.trim();
+        const description = promptDescInput.value.trim();
+        const category = promptCategoryInput.value.trim();
+        const rawTags = promptTagsInput.value.trim();
+        const body = promptBodyInput.value.trim();
+        const id = promptIdInput.value.trim();
+
+        if (!title || !description || !body) {
+          showToast('Title, description, and prompt body are required.', 'warning');
+          return;
+        }
+
+        const tags = rawTags ? rawTags.split(',').map(t => t.trim()).filter(Boolean) : [];
+
+        const promptData = {
+          title,
+          description,
+          category,
+          tags,
+          body
+        };
+
+        if (id) {
+          promptData.id = id;
+        }
+
+        const success = PromptStore.save(promptData);
+        if (success) {
+          showToast(id ? 'Prompt updated successfully!' : 'New prompt created!', 'success');
+          closePromptModal();
+          renderPrompts();
+        }
+      });
+
+      // Filter & Search Event Listeners
+      if (promptSearchInput) {
+        promptSearchInput.addEventListener('input', (e) => {
+          currentSearchQuery = e.target.value;
+          if (promptSearchClear) {
+            if (currentSearchQuery) promptSearchClear.classList.remove('hidden');
+            else promptSearchClear.classList.add('hidden');
+          }
+          renderPrompts();
+        });
+      }
+
+      if (promptSearchClear) {
+        promptSearchClear.addEventListener('click', () => {
+          promptSearchInput.value = '';
+          currentSearchQuery = '';
+          promptSearchClear.classList.add('hidden');
+          renderPrompts();
+          promptSearchInput.focus();
+        });
+      }
+
+      tagFilterButtons.forEach(btn => {
+        btn.addEventListener('click', () => {
+          const tag = btn.getAttribute('data-tag');
+          activeCategoryFilter = tag;
+
+          tagFilterButtons.forEach(b => {
+            if (b === btn) {
+              b.className = 'tag-filter-btn px-2.5 py-1 rounded-md bg-indigo-600 text-white font-medium border border-indigo-500 text-[11px] whitespace-nowrap';
+            } else {
+              b.className = 'tag-filter-btn px-2.5 py-1 rounded-md bg-slate-800/80 hover:bg-slate-700/60 text-slate-300 border border-slate-700 text-[11px] whitespace-nowrap';
+            }
+          });
+
+          renderPrompts();
+        });
+      });
+
+      if (newPromptBtn) newPromptBtn.addEventListener('click', () => openPromptModal());
+      if (emptyCreatePromptBtn) emptyCreatePromptBtn.addEventListener('click', () => openPromptModal());
+      if (promptModalClose) promptModalClose.addEventListener('click', closePromptModal);
+      if (promptModalCancel) promptModalCancel.addEventListener('click', closePromptModal);
+
+      // Close modal on outside backdrop click
+      promptModal.addEventListener('click', (e) => {
+        if (e.target === promptModal) closePromptModal();
+      });
+
+      // Reset Defaults button listener
+      const resetDefaultsBtn = document.getElementById('reset-defaults-btn');
+      if (resetDefaultsBtn) {
+        resetDefaultsBtn.addEventListener('click', () => {
+          if (confirm('Reset prompt templates back to factory defaults? Your custom additions will be replaced.')) {
+            PromptStore.resetToDefaults();
+          }
+        });
+      }
+
+      // Listen for custom prompts updated events across views
+      window.addEventListener('workbench:prompts-updated', () => {
+        renderPrompts();
+        updateMetricsAndCounters();
+      });
 
       // --- NAVIGATION CONTROLLER ---
       function switchView(viewName) {
@@ -907,9 +1578,12 @@
       // Expose switchView
       window.WorkbenchNav = { switchView };
 
-      // Initialize default view
+      // Initialize default view and data
       document.addEventListener('DOMContentLoaded', () => {
         checkStorageStatus();
+        PromptStore.initDefaults();
+        renderPrompts();
+        updateMetricsAndCounters();
         switchView('library');
       });
 

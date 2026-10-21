@@ -1859,6 +1859,364 @@ Instructions:
 
       window.WorkbenchInjector = InjectorController;
 
+      // ==========================================
+      // STAGE 4: SIDE-BY-SIDE DIFF & PATCH ENGINE
+      // ==========================================
+      function computeLineDiff(originalText, modifiedText) {
+        if (!originalText && !modifiedText) {
+          return { rows: [], added: 0, removed: 0, unchanged: 0, isIdentical: true, isEmpty: true };
+        }
+        if (originalText === modifiedText) {
+          const lines = originalText.split('\n');
+          const rows = lines.map((line, idx) => ({
+            type: 'unchanged',
+            origLineNum: idx + 1,
+            modLineNum: idx + 1,
+            origText: line,
+            modText: line
+          }));
+          return { rows, added: 0, removed: 0, unchanged: lines.length, isIdentical: true, isEmpty: false };
+        }
+
+        const linesA = originalText ? originalText.split('\n') : [];
+        const linesB = modifiedText ? modifiedText.split('\n') : [];
+
+        // Prefix trimming optimization (identical lines from top)
+        let prefixCount = 0;
+        while (prefixCount < linesA.length && prefixCount < linesB.length && linesA[prefixCount] === linesB[prefixCount]) {
+          prefixCount++;
+        }
+
+        // Suffix trimming optimization (identical lines from bottom)
+        let suffixCount = 0;
+        while (
+          suffixCount < linesA.length - prefixCount &&
+          suffixCount < linesB.length - prefixCount &&
+          linesA[linesA.length - 1 - suffixCount] === linesB[linesB.length - 1 - suffixCount]
+        ) {
+          suffixCount++;
+        }
+
+        const midA = linesA.slice(prefixCount, linesA.length - suffixCount);
+        const midB = linesB.slice(prefixCount, linesB.length - suffixCount);
+
+        let midDiffOps = [];
+        // Guard against excessive computation on massive file diffs
+        if (midA.length * midB.length > 2500000) {
+          midDiffOps = midA.map(text => ({ type: 'removed', text }))
+            .concat(midB.map(text => ({ type: 'added', text })));
+        } else {
+          const m = midA.length;
+          const n = midB.length;
+          const dp = Array.from({ length: m + 1 }, () => new Int32Array(n + 1));
+
+          for (let i = 1; i <= m; i++) {
+            for (let j = 1; j <= n; j++) {
+              if (midA[i - 1] === midB[j - 1]) {
+                dp[i][j] = dp[i - 1][j - 1] + 1;
+              } else {
+                dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1]);
+              }
+            }
+          }
+
+          // Backtrack to extract edit script
+          let i = m;
+          let j = n;
+          const revOps = [];
+          while (i > 0 || j > 0) {
+            if (i > 0 && j > 0 && midA[i - 1] === midB[j - 1]) {
+              revOps.push({ type: 'unchanged', text: midA[i - 1] });
+              i--;
+              j--;
+            } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
+              revOps.push({ type: 'added', text: midB[j - 1] });
+              j--;
+            } else if (i > 0 && (j === 0 || dp[i][j - 1] < dp[i - 1][j])) {
+              revOps.push({ type: 'removed', text: midA[i - 1] });
+              i--;
+            }
+          }
+          midDiffOps = revOps.reverse();
+        }
+
+        // Combine prefix, middle diff ops, and suffix
+        const allOps = [];
+        for (let k = 0; k < prefixCount; k++) {
+          allOps.push({ type: 'unchanged', text: linesA[k] });
+        }
+        allOps.push(...midDiffOps);
+        for (let k = linesA.length - suffixCount; k < linesA.length; k++) {
+          allOps.push({ type: 'unchanged', text: linesA[k] });
+        }
+
+        // Convert diff operations to aligned side-by-side rows
+        const rows = [];
+        let curOrigLine = 1;
+        let curModLine = 1;
+        let addedCount = 0;
+        let removedCount = 0;
+        let unchangedCount = 0;
+
+        let idx = 0;
+        while (idx < allOps.length) {
+          const op = allOps[idx];
+
+          if (op.type === 'unchanged') {
+            rows.push({
+              type: 'unchanged',
+              origLineNum: curOrigLine++,
+              modLineNum: curModLine++,
+              origText: op.text,
+              modText: op.text
+            });
+            unchangedCount++;
+            idx++;
+          } else if (op.type === 'removed') {
+            const removedBlock = [];
+            while (idx < allOps.length && allOps[idx].type === 'removed') {
+              removedBlock.push(allOps[idx].text);
+              idx++;
+            }
+            const addedBlock = [];
+            while (idx < allOps.length && allOps[idx].type === 'added') {
+              addedBlock.push(allOps[idx].text);
+              idx++;
+            }
+
+            const maxLen = Math.max(removedBlock.length, addedBlock.length);
+            for (let r = 0; r < maxLen; r++) {
+              const hasRem = r < removedBlock.length;
+              const hasAdd = r < addedBlock.length;
+
+              if (hasRem) removedCount++;
+              if (hasAdd) addedCount++;
+
+              rows.push({
+                type: (hasRem && hasAdd) ? 'modified' : (hasRem ? 'removed' : 'added'),
+                origLineNum: hasRem ? curOrigLine++ : null,
+                modLineNum: hasAdd ? curModLine++ : null,
+                origText: hasRem ? removedBlock[r] : null,
+                modText: hasAdd ? addedBlock[r] : null
+              });
+            }
+          } else if (op.type === 'added') {
+            rows.push({
+              type: 'added',
+              origLineNum: null,
+              modLineNum: curModLine++,
+              origText: null,
+              modText: op.text
+            });
+            addedCount++;
+            idx++;
+          }
+        }
+
+        return {
+          rows,
+          added: addedCount,
+          removed: removedCount,
+          unchanged: unchangedCount,
+          isIdentical: addedCount === 0 && removedCount === 0,
+          isEmpty: linesA.length === 0 && linesB.length === 0
+        };
+      }
+
+      window.WorkbenchDiffEngine = { computeLineDiff };
+
+      // Diff Inspector UI Controller
+      const DiffController = {
+        debounceTimer: null,
+
+        init() {
+          this.origInput = document.getElementById('diff-orig-input');
+          this.modInput = document.getElementById('diff-mod-input');
+          this.resultsContainer = document.getElementById('diff-results-container');
+
+          this.addedCountBadge = document.getElementById('diff-added-count');
+          this.removedCountBadge = document.getElementById('diff-removed-count');
+          this.unchangedCountBadge = document.getElementById('diff-unchanged-count');
+
+          this.origStats = document.getElementById('diff-orig-stats');
+          this.modStats = document.getElementById('diff-mod-stats');
+
+          this.swapBtn = document.getElementById('diff-swap-btn');
+          this.normalizeBtn = document.getElementById('diff-normalize-indent-btn');
+          this.clearBtn = document.getElementById('diff-clear-btn');
+          this.copyModBtn = document.getElementById('diff-copy-modified-btn');
+
+          this.bindEvents();
+          this.render();
+        },
+
+        bindEvents() {
+          const debouncedRender = () => {
+            clearTimeout(this.debounceTimer);
+            this.debounceTimer = setTimeout(() => this.render(), 120);
+          };
+
+          if (this.origInput) this.origInput.addEventListener('input', debouncedRender);
+          if (this.modInput) this.modInput.addEventListener('input', debouncedRender);
+
+          if (this.swapBtn) {
+            this.swapBtn.addEventListener('click', () => {
+              const temp = this.origInput.value;
+              this.origInput.value = this.modInput.value;
+              this.modInput.value = temp;
+              this.render();
+              showToast('Swapped Original and Modified contents.', 'info');
+            });
+          }
+
+          if (this.normalizeBtn) {
+            this.normalizeBtn.addEventListener('click', () => {
+              const norm = (str) => {
+                return str
+                  .split('\n')
+                  .map(line => line.replace(/\t/g, '  ').replace(/\s+$/, ''))
+                  .join('\n');
+              };
+              this.origInput.value = norm(this.origInput.value);
+              this.modInput.value = norm(this.modInput.value);
+              this.render();
+              showToast('Normalized indentation (tabs converted to 2 spaces).', 'success');
+            });
+          }
+
+          if (this.clearBtn) {
+            this.clearBtn.addEventListener('click', () => {
+              this.origInput.value = '';
+              this.modInput.value = '';
+              this.render();
+              showToast('Cleared diff inputs.', 'info');
+            });
+          }
+
+          if (this.copyModBtn) {
+            this.copyModBtn.addEventListener('click', () => {
+              copyTextToClipboard(this.modInput.value, 'Modified code copied to clipboard!');
+            });
+          }
+        },
+
+        render() {
+          const origText = this.origInput ? this.origInput.value : '';
+          const modText = this.modInput ? this.modInput.value : '';
+
+          // Update pane line stats
+          const origLines = origText ? origText.split('\n').length : 0;
+          const modLines = modText ? modText.split('\n').length : 0;
+          if (this.origStats) this.origStats.textContent = `${origLines} line${origLines === 1 ? '' : 's'}`;
+          if (this.modStats) this.modStats.textContent = `${modLines} line${modLines === 1 ? '' : 's'}`;
+
+          if (!this.resultsContainer) return;
+
+          // Compute Diff
+          const diff = computeLineDiff(origText, modText);
+
+          // Update header badges
+          if (this.addedCountBadge) this.addedCountBadge.textContent = diff.added;
+          if (this.removedCountBadge) this.removedCountBadge.textContent = diff.removed;
+          if (this.unchangedCountBadge) this.unchangedCountBadge.textContent = diff.unchanged;
+
+          // Render empty state
+          if (diff.isEmpty) {
+            this.resultsContainer.innerHTML = `
+              <div class="text-center py-16 text-slate-500 italic text-xs">
+                <i class="fa-solid fa-code-compare text-2xl mb-2 text-slate-600 block"></i>
+                Paste code in both panes above to inspect changes.
+              </div>
+            `;
+            return;
+          }
+
+          // Render identical notification banner
+          if (diff.isIdentical) {
+            this.resultsContainer.innerHTML = `
+              <div class="p-3 bg-emerald-950/25 border-b border-emerald-900/50 flex items-center justify-between text-emerald-300 text-xs font-sans">
+                <div class="flex items-center gap-2">
+                  <i class="fa-solid fa-circle-check text-emerald-400"></i>
+                  <span class="font-medium">Files are identical</span>
+                  <span class="text-emerald-400/80 font-mono text-[11px]">(${diff.unchanged} lines identical, 0 modifications)</span>
+                </div>
+              </div>
+              <table class="w-full border-collapse font-mono text-xs">
+                <tbody>
+                  ${diff.rows.map(row => `
+                    <tr class="hover:bg-slate-900/40 text-slate-300">
+                      <td class="w-12 py-0.5 px-2 text-right select-none text-slate-600 border-r border-slate-900 text-[11px]">${row.origLineNum}</td>
+                      <td class="py-0.5 px-3 whitespace-pre overflow-x-auto font-mono text-xs text-slate-300">${escapeHtml(row.origText)}</td>
+                      <td class="w-12 py-0.5 px-2 text-right select-none text-slate-600 border-r border-l border-slate-900 text-[11px]">${row.modLineNum}</td>
+                      <td class="py-0.5 px-3 whitespace-pre overflow-x-auto font-mono text-xs text-slate-300">${escapeHtml(row.modText)}</td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            `;
+            return;
+          }
+
+          // Render Side-by-side Aligned Comparison Table
+          this.resultsContainer.innerHTML = `
+            <table class="w-full border-collapse font-mono text-xs select-text">
+              <thead>
+                <tr class="bg-[#0b101d] text-slate-400 text-[11px] border-b border-slate-800/80 select-none">
+                  <th class="w-12 py-1.5 px-2 text-right">#</th>
+                  <th class="py-1.5 px-3 text-left font-semibold text-rose-300">Original Code (-)</th>
+                  <th class="w-12 py-1.5 px-2 text-right border-l border-slate-800">#</th>
+                  <th class="py-1.5 px-3 text-left font-semibold text-emerald-300">Modified Code (+)</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${diff.rows.map(row => {
+                  let leftBg = 'hover:bg-slate-900/30 text-slate-300';
+                  let rightBg = 'hover:bg-slate-900/30 text-slate-300';
+                  let leftNum = row.origLineNum !== null ? row.origLineNum : '';
+                  let rightNum = row.modLineNum !== null ? row.modLineNum : '';
+                  let leftText = row.origText !== null ? escapeHtml(row.origText) : '';
+                  let rightText = row.modText !== null ? escapeHtml(row.modText) : '';
+
+                  if (row.type === 'removed') {
+                    leftBg = 'bg-rose-950/30 text-rose-200 border-l-2 border-rose-500';
+                    rightBg = 'bg-slate-950/40 text-slate-700';
+                  } else if (row.type === 'added') {
+                    leftBg = 'bg-slate-950/40 text-slate-700';
+                    rightBg = 'bg-emerald-950/30 text-emerald-200 border-l-2 border-emerald-500';
+                  } else if (row.type === 'modified') {
+                    leftBg = 'bg-rose-950/30 text-rose-200 border-l-2 border-rose-500';
+                    rightBg = 'bg-emerald-950/30 text-emerald-200 border-l-2 border-emerald-500';
+                  }
+
+                  return `
+                    <tr class="divide-x divide-slate-900/80 border-b border-slate-900/40">
+                      <!-- Left Line Number -->
+                      <td class="w-12 py-0.5 px-2 text-right select-none font-mono text-[11px] ${row.origLineNum ? (row.type === 'removed' || row.type === 'modified' ? 'text-rose-400 bg-rose-950/40' : 'text-slate-600') : 'bg-slate-950/60'}">
+                        ${leftNum}
+                      </td>
+                      <!-- Left Line Content -->
+                      <td class="py-0.5 px-3 whitespace-pre overflow-x-auto ${leftBg}">
+                        ${row.origText !== null ? leftText : '<span class="opacity-20 select-none">···</span>'}
+                      </td>
+                      <!-- Right Line Number -->
+                      <td class="w-12 py-0.5 px-2 text-right select-none font-mono text-[11px] ${row.modLineNum ? (row.type === 'added' || row.type === 'modified' ? 'text-emerald-400 bg-emerald-950/40' : 'text-slate-600') : 'bg-slate-950/60'}">
+                        ${rightNum}
+                      </td>
+                      <!-- Right Line Content -->
+                      <td class="py-0.5 px-3 whitespace-pre overflow-x-auto ${rightBg}">
+                        ${row.modText !== null ? rightText : '<span class="opacity-20 select-none">···</span>'}
+                      </td>
+                    </tr>
+                  `;
+                }).join('')}
+              </tbody>
+            </table>
+          `;
+        }
+      };
+
+      window.WorkbenchDiff = DiffController;
+
       // --- NAVIGATION CONTROLLER ---
       function switchView(viewName) {
         if (!VIEWS[viewName]) return;
@@ -1944,6 +2302,7 @@ Instructions:
         PromptStore.initDefaults();
         renderPrompts();
         InjectorController.init();
+        DiffController.init();
         updateMetricsAndCounters();
         switchView('library');
       });

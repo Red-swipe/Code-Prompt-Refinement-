@@ -1,0 +1,919 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Prompt & Code Studio Workbench</title>
+  <meta name="description" content="A local-first developer productivity workbench for prompt engineering, dynamic variable injection, side-by-side diffing, and workspace management.">
+  
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  
+  <!-- Font Awesome Icons CDN -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" integrity="sha512-DTOQO9RWCH3ppGqcWaEA1BIZOC6xxalwEsw9c2QQeAIftl+Vegovlnee1c9QX4TctnWMn13TZye+giMm8e2LwA==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+  
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              bg: '#090d16',
+              surface: '#0f172a',
+              card: '#131b2e',
+              border: '#1e293b',
+              muted: '#64748b',
+              accent: '#6366f1',
+              'accent-hover': '#4f46e5',
+              success: '#10b981',
+              danger: '#f43f5e',
+              warning: '#f59e0b'
+            }
+          },
+          fontFamily: {
+            sans: ['Inter', 'system-ui', '-apple-system', 'sans-serif'],
+            mono: ['JetBrains Mono', 'Consolas', 'Menlo', 'monospace']
+          }
+        }
+      }
+    };
+  </script>
+
+  <!-- Fallback & Custom Workbench Styles -->
+  <style>
+    /* CSS Base & Offline Fallback Reset */
+    :root {
+      --bg-main: #090d16;
+      --surface-1: #0f172a;
+      --surface-2: #131b2e;
+      --surface-border: #1e293b;
+      --accent: #6366f1;
+      --accent-hover: #4f46e5;
+      --text-main: #f8fafc;
+      --text-muted: #94a3b8;
+    }
+    body {
+      background-color: var(--bg-main);
+      color: var(--text-main);
+      font-family: 'Inter', system-ui, -apple-system, sans-serif;
+      overflow-x: hidden;
+      margin: 0;
+      padding: 0;
+      min-height: 100vh;
+    }
+    code, pre, .font-mono {
+      font-family: 'JetBrains Mono', Consolas, Menlo, monospace;
+    }
+    
+    /* Custom Scrollbar */
+    ::-webkit-scrollbar {
+      width: 7px;
+      height: 7px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #090d16;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #25334d;
+      border-radius: 4px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #384b6e;
+    }
+
+    /* Subtle Glass & Border Highlights */
+    .glass-panel {
+      background: rgba(15, 23, 42, 0.85);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(30, 41, 59, 0.7);
+    }
+    .focus-ring:focus-visible {
+      outline: 2px solid #6366f1;
+      outline-offset: 1px;
+    }
+
+    /* Modal Backdrop Transitions */
+    .modal-backdrop {
+      background-color: rgba(3, 7, 18, 0.75);
+      backdrop-filter: blur(4px);
+    }
+    
+    /* Toast slide animation */
+    @keyframes toastSlideIn {
+      from { transform: translateX(110%); opacity: 0; }
+      to { transform: translateX(0); opacity: 1; }
+    }
+    .toast-anim {
+      animation: toastSlideIn 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    }
+  </style>
+</head>
+<body class="bg-[#090d16] text-slate-100 antialiased flex h-screen overflow-hidden select-none sm:select-auto">
+
+  <!-- Mobile Menu Backdrop -->
+  <div id="mobile-overlay" class="fixed inset-0 bg-black/60 z-30 hidden md:hidden transition-opacity"></div>
+
+  <!-- App Wrapper -->
+  <div class="flex h-full w-full overflow-hidden">
+    
+    <!-- SIDEBAR -->
+    <aside id="app-sidebar" class="fixed inset-y-0 left-0 z-40 w-64 bg-[#0c1220] border-r border-slate-800/80 flex flex-col transition-transform duration-200 ease-in-out -translate-x-full md:translate-x-0 md:static md:flex-shrink-0">
+      
+      <!-- Brand & Header -->
+      <div class="p-5 border-b border-slate-800/80 flex items-center justify-between">
+        <div class="flex items-center gap-3">
+          <div class="w-9 h-9 rounded-lg bg-gradient-to-tr from-indigo-600 via-indigo-500 to-emerald-400 flex items-center justify-center text-white shadow-lg shadow-indigo-500/20">
+            <i class="fa-solid fa-terminal text-sm"></i>
+          </div>
+          <div>
+            <h1 class="text-sm font-bold tracking-tight text-white flex items-center gap-1.5">
+              Studio Workbench
+              <span class="text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-400 border border-indigo-500/30">v1.0</span>
+            </h1>
+            <p class="text-[11px] text-slate-400 truncate max-w-[140px]">Prompt & Code Studio</p>
+          </div>
+        </div>
+        <button id="close-sidebar-btn" class="md:hidden text-slate-400 hover:text-white p-1" title="Close sidebar">
+          <i class="fa-solid fa-xmark text-lg"></i>
+        </button>
+      </div>
+
+      <!-- Navigation Links -->
+      <nav class="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
+        <div class="px-3 pb-2 text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
+          Workspace Navigation
+        </div>
+
+        <button data-nav="library" class="nav-item group w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-sm font-medium transition-colors bg-indigo-600/15 text-indigo-400 border border-indigo-500/30">
+          <div class="flex items-center gap-3">
+            <i class="fa-solid fa-book-bookmark w-4 text-center"></i>
+            <span>Prompt Library</span>
+          </div>
+          <span id="nav-count-prompts" class="text-xs px-2 py-0.5 rounded-full bg-slate-800/80 text-slate-300 border border-slate-700/60 font-mono">0</span>
+        </button>
+
+        <button data-nav="injector" class="nav-item group w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-sm font-medium transition-colors text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border border-transparent">
+          <div class="flex items-center gap-3">
+            <i class="fa-solid fa-sliders w-4 text-center"></i>
+            <span>Variable Injector</span>
+          </div>
+          <span class="text-[10px] text-slate-500 group-hover:text-slate-400 font-mono uppercase">Live</span>
+        </button>
+
+        <button data-nav="diff" class="nav-item group w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-sm font-medium transition-colors text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border border-transparent">
+          <div class="flex items-center gap-3">
+            <i class="fa-solid fa-code-compare w-4 text-center"></i>
+            <span>Diff & Patch</span>
+          </div>
+          <span class="text-[10px] text-slate-500 group-hover:text-slate-400 font-mono uppercase">LCS</span>
+        </button>
+
+        <button data-nav="settings" class="nav-item group w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-sm font-medium transition-colors text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border border-transparent">
+          <div class="flex items-center gap-3">
+            <i class="fa-solid fa-gear w-4 text-center"></i>
+            <span>Settings & Backup</span>
+          </div>
+          <i class="fa-solid fa-database text-xs text-slate-500"></i>
+        </button>
+      </nav>
+
+      <!-- Sidebar Footer / Environment info -->
+      <div class="p-3 border-t border-slate-800/80 bg-[#0a0f1a]">
+        <div class="p-2.5 rounded-lg bg-slate-900/80 border border-slate-800 text-xs">
+          <div class="flex items-center justify-between text-slate-400 mb-1">
+            <span class="flex items-center gap-1.5 font-medium">
+              <span id="storage-status-dot" class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+              Local Storage
+            </span>
+            <span id="storage-usage-text" class="text-[10px] text-slate-400 font-mono">Ready</span>
+          </div>
+          <p class="text-[11px] text-slate-400 leading-tight">Private & client-side only. Zero telemetry.</p>
+        </div>
+      </div>
+    </aside>
+
+    <!-- MAIN VIEWPORT CONTAINER -->
+    <div class="flex-1 flex flex-col h-full min-w-0 overflow-hidden">
+      
+      <!-- TOP HEADER -->
+      <header class="h-16 border-b border-slate-800/80 bg-[#0c1220]/90 backdrop-blur px-4 sm:px-6 flex items-center justify-between gap-4 flex-shrink-0 z-20">
+        <!-- Left: Mobile Menu + View Header -->
+        <div class="flex items-center gap-3 min-w-0">
+          <button id="open-sidebar-btn" class="md:hidden text-slate-400 hover:text-white p-2 rounded-lg hover:bg-slate-800 focus:outline-none" title="Open navigation">
+            <i class="fa-solid fa-bars text-lg"></i>
+          </button>
+          
+          <div class="min-w-0">
+            <h2 id="top-view-title" class="text-base sm:text-lg font-semibold text-white tracking-tight truncate">Prompt Library</h2>
+            <p id="top-view-desc" class="text-xs text-slate-400 hidden sm:block truncate">Manage, curate, and search production system prompt templates</p>
+          </div>
+        </div>
+
+        <!-- Right: Actions & Launcher -->
+        <div class="flex items-center gap-2 sm:gap-3 flex-shrink-0">
+          <!-- Quick Launcher Trigger Button -->
+          <button id="quick-launcher-btn" class="flex items-center gap-2 px-2.5 sm:px-3 py-1.5 rounded-lg bg-slate-800/80 hover:bg-slate-700/80 border border-slate-700 text-slate-300 text-xs transition-colors" title="Quick Launcher (Ctrl+K)">
+            <i class="fa-solid fa-magnifying-glass text-slate-400 text-xs"></i>
+            <span class="hidden md:inline">Quick Jump</span>
+            <kbd class="hidden sm:inline-block font-mono text-[10px] bg-slate-900 px-1.5 py-0.5 rounded text-slate-400 border border-slate-700">Ctrl+K</kbd>
+          </button>
+
+          <!-- Export Workspace Button -->
+          <button id="header-export-btn" class="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg bg-slate-800/70 hover:bg-slate-700/80 border border-slate-700/80 text-slate-300 text-xs transition-colors" title="Export Workspace JSON Backup">
+            <i class="fa-solid fa-download text-xs text-indigo-400"></i>
+            <span class="hidden sm:inline">Export</span>
+          </button>
+
+          <!-- Import Workspace Button -->
+          <button id="header-import-btn" class="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg bg-slate-800/70 hover:bg-slate-700/80 border border-slate-700/80 text-slate-300 text-xs transition-colors" title="Import Workspace JSON Backup">
+            <i class="fa-solid fa-upload text-xs text-emerald-400"></i>
+            <span class="hidden sm:inline">Import</span>
+          </button>
+          <input type="file" id="header-import-file-input" accept=".json,application/json" class="hidden">
+        </div>
+      </header>
+
+      <!-- MAIN CONTENT VIEWPORT (TAB SWITCHING) -->
+      <main class="flex-1 overflow-y-auto bg-[#090d16] p-4 sm:p-6 relative focus:outline-none" tabindex="-1" id="main-content-area">
+        
+        <!-- ================= VIEW 1: PROMPT LIBRARY ================= -->
+        <section id="view-library" class="view-panel space-y-6">
+          <!-- Library Header Bar -->
+          <div class="flex flex-col md:flex-row gap-4 items-start md:items-center justify-between pb-2 border-b border-slate-800/80">
+            <div>
+              <h3 class="text-xl font-bold text-white flex items-center gap-2">
+                <span>System Prompts</span>
+                <span id="library-count-badge" class="text-xs px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 font-mono">0 templates</span>
+              </h3>
+              <p class="text-xs text-slate-400 mt-0.5">Reusable, structured prompt designs with dynamic variable placeholders.</p>
+            </div>
+            
+            <div class="flex items-center gap-2 self-stretch md:self-auto">
+              <button id="new-prompt-btn" class="flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-md shadow-indigo-600/25 transition-all">
+                <i class="fa-solid fa-plus text-xs"></i>
+                <span>New Prompt</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Search & Filter Controls -->
+          <div class="grid grid-cols-1 md:grid-cols-12 gap-3 items-center">
+            <!-- Search Bar -->
+            <div class="md:col-span-7 relative">
+              <i class="fa-solid fa-magnifying-glass absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500 text-xs"></i>
+              <input type="text" id="prompt-search-input" placeholder="Search prompts by title, description, tags, or content..." class="w-full pl-9 pr-8 py-2 rounded-lg bg-[#0f172a] border border-slate-800 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition-colors">
+              <button id="prompt-search-clear" class="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 hidden text-xs p-1" title="Clear search">
+                <i class="fa-solid fa-xmark"></i>
+              </button>
+            </div>
+
+            <!-- Category / Tag Filter Chips Container -->
+            <div class="md:col-span-5 flex items-center gap-1.5 overflow-x-auto pb-1 text-xs" id="category-filter-chips">
+              <button data-tag="all" class="tag-filter-btn px-2.5 py-1 rounded-md bg-indigo-600 text-white font-medium border border-indigo-500 text-[11px] whitespace-nowrap">All</button>
+              <button data-tag="coding" class="tag-filter-btn px-2.5 py-1 rounded-md bg-slate-800/80 hover:bg-slate-700/60 text-slate-300 border border-slate-700 text-[11px] whitespace-nowrap">Coding</button>
+              <button data-tag="architecture" class="tag-filter-btn px-2.5 py-1 rounded-md bg-slate-800/80 hover:bg-slate-700/60 text-slate-300 border border-slate-700 text-[11px] whitespace-nowrap">Architecture</button>
+              <button data-tag="ui" class="tag-filter-btn px-2.5 py-1 rounded-md bg-slate-800/80 hover:bg-slate-700/60 text-slate-300 border border-slate-700 text-[11px] whitespace-nowrap">UI</button>
+              <button data-tag="debugging" class="tag-filter-btn px-2.5 py-1 rounded-md bg-slate-800/80 hover:bg-slate-700/60 text-slate-300 border border-slate-700 text-[11px] whitespace-nowrap">Debugging</button>
+              <button data-tag="security" class="tag-filter-btn px-2.5 py-1 rounded-md bg-slate-800/80 hover:bg-slate-700/60 text-slate-300 border border-slate-700 text-[11px] whitespace-nowrap">Security</button>
+            </div>
+          </div>
+
+          <!-- Prompt Cards Grid -->
+          <div id="prompts-grid" class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <!-- Populated via JavaScript -->
+          </div>
+
+          <!-- Empty State -->
+          <div id="prompts-empty-state" class="hidden text-center py-16 px-4 border border-dashed border-slate-800 rounded-xl bg-slate-900/30">
+            <div class="w-12 h-12 mx-auto rounded-full bg-slate-800/80 flex items-center justify-center text-slate-500 mb-3">
+              <i class="fa-solid fa-file-circle-question text-xl"></i>
+            </div>
+            <h4 class="text-sm font-semibold text-slate-200">No prompts found</h4>
+            <p class="text-xs text-slate-400 max-w-sm mx-auto mt-1">Try adjusting your search criteria or create a brand new prompt template.</p>
+            <button id="empty-create-prompt-btn" class="mt-4 px-3.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium">Create New Prompt</button>
+          </div>
+        </section>
+
+        <!-- ================= VIEW 2: VARIABLE INJECTOR ================= -->
+        <section id="view-injector" class="view-panel hidden space-y-6">
+          <div class="flex flex-col md:flex-row gap-4 items-start md:items-center justify-between pb-2 border-b border-slate-800/80">
+            <div>
+              <h3 class="text-xl font-bold text-white flex items-center gap-2">
+                <span>Variable Injector</span>
+                <span class="text-xs px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-mono">Dynamic Substitution</span>
+              </h3>
+              <p class="text-xs text-slate-400 mt-0.5">Detects <code class="text-indigo-400 bg-indigo-950/40 px-1 py-0.5 rounded border border-indigo-900/60 font-mono">{{VARIABLE}}</code> tags and synthesizes real-time prompts.</p>
+            </div>
+
+            <!-- Active Template Selector -->
+            <div class="flex items-center gap-2 w-full md:w-auto">
+              <label for="injector-prompt-select" class="text-xs text-slate-400 whitespace-nowrap">Template:</label>
+              <select id="injector-prompt-select" class="flex-1 md:w-64 px-3 py-1.5 rounded-lg bg-[#0f172a] border border-slate-800 text-xs text-slate-200 focus:outline-none focus:border-indigo-500">
+                <!-- Dynamically populated -->
+              </select>
+            </div>
+          </div>
+
+          <!-- Dual Pane Layout -->
+          <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+            
+            <!-- Left: Dynamic Inputs & Preset Management (5 Cols) -->
+            <div class="lg:col-span-5 space-y-4">
+              <div class="rounded-xl border border-slate-800 bg-[#0c1220] p-4 space-y-4">
+                <div class="flex items-center justify-between pb-2 border-b border-slate-800/80">
+                  <span class="text-xs font-semibold text-slate-200 flex items-center gap-1.5">
+                    <i class="fa-solid fa-list-check text-indigo-400"></i>
+                    Detected Variables (<span id="detected-vars-count">0</span>)
+                  </span>
+                  
+                  <!-- Preset actions -->
+                  <div class="flex items-center gap-1.5">
+                    <button id="save-preset-btn" class="text-[11px] px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700/80 flex items-center gap-1">
+                      <i class="fa-solid fa-bookmark text-amber-400"></i>
+                      <span>Save Preset</span>
+                    </button>
+                    <select id="load-preset-select" class="text-[11px] px-2 py-1 rounded bg-slate-900 border border-slate-800 text-slate-300 max-w-[120px]">
+                      <option value="">Presets...</option>
+                    </select>
+                  </div>
+                </div>
+
+                <!-- Form container -->
+                <div id="dynamic-variables-form" class="space-y-3.5 max-h-[520px] overflow-y-auto pr-1">
+                  <!-- Injected form fields will appear here -->
+                  <div class="text-center py-8 text-xs text-slate-500 italic">
+                    Select a prompt template with placeholders to generate input fields.
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Right: Live Substituted Preview & Token Counter (7 Cols) -->
+            <div class="lg:col-span-7 space-y-4">
+              <div class="rounded-xl border border-slate-800 bg-[#0c1220] flex flex-col h-full overflow-hidden">
+                <!-- Preview Toolbar -->
+                <div class="p-3 bg-[#0e1626] border-b border-slate-800 flex items-center justify-between flex-wrap gap-2">
+                  <div class="flex items-center gap-2">
+                    <span class="text-xs font-semibold text-slate-200 flex items-center gap-1.5">
+                      <i class="fa-solid fa-eye text-emerald-400"></i>
+                      Live Prompt Preview
+                    </span>
+                    <span id="preview-unresolved-badge" class="hidden text-[10px] font-mono px-1.5 py-0.5 rounded bg-rose-500/15 text-rose-400 border border-rose-500/30">
+                      Unresolved Variables
+                    </span>
+                  </div>
+
+                  <!-- Quick Action Buttons -->
+                  <div class="flex items-center gap-2">
+                    <button id="copy-final-prompt-btn" class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold transition-colors" title="Copy preview to clipboard (Ctrl+Enter)">
+                      <i class="fa-solid fa-copy"></i>
+                      <span>Copy Output</span>
+                    </button>
+                    <button id="send-to-diff-btn" class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-xs font-medium transition-colors" title="Send to Diff Inspector">
+                      <i class="fa-solid fa-arrow-right-arrow-left text-slate-400"></i>
+                      <span>Send to Diff</span>
+                    </button>
+                  </div>
+                </div>
+
+                <!-- Preview Area -->
+                <div class="p-4 bg-[#090d16] flex-1 min-h-[360px] max-h-[500px] overflow-y-auto font-mono text-xs text-slate-200 leading-relaxed whitespace-pre-wrap select-text" id="live-prompt-preview">
+                  <!-- Live preview text rendered here -->
+                </div>
+
+                <!-- Metrics footer (Tokens, Words, Chars) -->
+                <div class="p-2.5 bg-[#0b101c] border-t border-slate-800 flex items-center justify-between text-[11px] text-slate-400 font-mono">
+                  <div class="flex items-center gap-3">
+                    <span>Chars: <strong id="metric-chars" class="text-slate-200">0</strong></span>
+                    <span>Words: <strong id="metric-words" class="text-slate-200">0</strong></span>
+                    <span>Lines: <strong id="metric-lines" class="text-slate-200">0</strong></span>
+                  </div>
+                  <div class="flex items-center gap-2">
+                    <span class="text-indigo-400 font-semibold" title="Based on character count / 4 heuristic">Est. Tokens: <strong id="metric-tokens" class="text-indigo-300">~0</strong></span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </section>
+
+        <!-- ================= VIEW 3: DIFF & PATCH INSPECTOR ================= -->
+        <section id="view-diff" class="view-panel hidden space-y-6">
+          <div class="flex flex-col md:flex-row gap-4 items-start md:items-center justify-between pb-2 border-b border-slate-800/80">
+            <div>
+              <h3 class="text-xl font-bold text-white flex items-center gap-2">
+                <span>Diff & Patch Inspector</span>
+                <span class="text-xs px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 font-mono">LCS Line Diff</span>
+              </h3>
+              <p class="text-xs text-slate-400 mt-0.5">Inspect code modifications, compare AI suggestions against original source, and verify patches.</p>
+            </div>
+
+            <!-- Utility Actions -->
+            <div class="flex items-center gap-2 flex-wrap">
+              <button id="diff-swap-btn" class="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-xs font-medium flex items-center gap-1.5" title="Swap Original and Modified">
+                <i class="fa-solid fa-right-left text-xs"></i>
+                <span>Swap</span>
+              </button>
+              <button id="diff-normalize-indent-btn" class="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-xs font-medium flex items-center gap-1.5" title="Normalize Indentation (Tabs to 2 Spaces)">
+                <i class="fa-solid fa-indent text-xs"></i>
+                <span>Normalize</span>
+              </button>
+              <button id="diff-clear-btn" class="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-xs font-medium flex items-center gap-1.5" title="Clear both inputs">
+                <i class="fa-solid fa-trash-can text-xs text-rose-400"></i>
+                <span>Clear</span>
+              </button>
+              <button id="diff-copy-modified-btn" class="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold flex items-center gap-1.5" title="Copy Modified Code">
+                <i class="fa-solid fa-copy text-xs"></i>
+                <span>Copy Modified</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Dual Code Editors -->
+          <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <!-- Original Source Pane -->
+            <div class="rounded-xl border border-slate-800 bg-[#0c1220] flex flex-col overflow-hidden">
+              <div class="p-2.5 bg-[#0e1626] border-b border-slate-800 flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                  <span class="w-2.5 h-2.5 rounded-full bg-rose-500/80"></span>
+                  <span class="text-xs font-semibold text-slate-200">Original Code / Source</span>
+                </div>
+                <span id="diff-orig-stats" class="text-[10px] font-mono text-slate-400">0 lines</span>
+              </div>
+              <textarea id="diff-orig-input" placeholder="// Paste original code or initial prompt here..." class="w-full h-48 sm:h-64 p-3 bg-[#080c14] font-mono text-xs text-slate-200 border-0 focus:outline-none focus:ring-1 focus:ring-indigo-500/50 resize-y leading-relaxed"></textarea>
+            </div>
+
+            <!-- Modified Code Pane -->
+            <div class="rounded-xl border border-slate-800 bg-[#0c1220] flex flex-col overflow-hidden">
+              <div class="p-2.5 bg-[#0e1626] border-b border-slate-800 flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                  <span class="w-2.5 h-2.5 rounded-full bg-emerald-500/80"></span>
+                  <span class="text-xs font-semibold text-slate-200">Modified Code / AI Revision</span>
+                </div>
+                <span id="diff-mod-stats" class="text-[10px] font-mono text-slate-400">0 lines</span>
+              </div>
+              <textarea id="diff-mod-input" placeholder="// Paste modified code or revised prompt here..." class="w-full h-48 sm:h-64 p-3 bg-[#080c14] font-mono text-xs text-slate-200 border-0 focus:outline-none focus:ring-1 focus:ring-indigo-500/50 resize-y leading-relaxed"></textarea>
+            </div>
+          </div>
+
+          <!-- Diff Visualization Output -->
+          <div class="rounded-xl border border-slate-800 bg-[#0c1220] overflow-hidden">
+            <div class="p-3 bg-[#0e1626] border-b border-slate-800 flex items-center justify-between flex-wrap gap-2">
+              <div class="flex items-center gap-2">
+                <i class="fa-solid fa-code-compare text-indigo-400 text-xs"></i>
+                <span class="text-xs font-semibold text-slate-200">Line-by-Line Aligned Diff</span>
+              </div>
+              <div class="flex items-center gap-3 text-xs font-mono">
+                <span class="text-emerald-400 flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-emerald-500 inline-block"></span> +<span id="diff-added-count">0</span></span>
+                <span class="text-rose-400 flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-rose-500 inline-block"></span> -<span id="diff-removed-count">0</span></span>
+                <span class="text-slate-400">Unchanged: <span id="diff-unchanged-count">0</span></span>
+              </div>
+            </div>
+
+            <!-- Visual Diff Table / Container -->
+            <div id="diff-results-container" class="max-h-[500px] overflow-auto font-mono text-xs divide-y divide-slate-900 bg-[#070a12]">
+              <div class="text-center py-12 text-slate-500 italic text-xs">
+                Enter code in both panes above to inspect changes.
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ================= VIEW 4: SETTINGS & BACKUP ================= -->
+        <section id="view-settings" class="view-panel hidden space-y-6">
+          <div class="pb-2 border-b border-slate-800/80">
+            <h3 class="text-xl font-bold text-white flex items-center gap-2">
+              <span>Settings & Workspace Backup</span>
+              <span class="text-xs px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 border border-slate-700 font-mono">Local Data</span>
+            </h3>
+            <p class="text-xs text-slate-400 mt-0.5">Manage persistent storage, export complete JSON workspace backups, or restore past sessions.</p>
+          </div>
+
+          <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <!-- Card 1: Data Backup & Restore -->
+            <div class="rounded-xl border border-slate-800 bg-[#0c1220] p-5 space-y-4">
+              <div class="flex items-center gap-3">
+                <div class="w-8 h-8 rounded-lg bg-indigo-500/10 text-indigo-400 flex items-center justify-center border border-indigo-500/20">
+                  <i class="fa-solid fa-file-export"></i>
+                </div>
+                <div>
+                  <h4 class="text-sm font-semibold text-white">JSON Workspace Export & Restore</h4>
+                  <p class="text-xs text-slate-400">Backup your system prompts, variable presets, and configuration.</p>
+                </div>
+              </div>
+
+              <div class="pt-2 border-t border-slate-800/80 flex flex-col sm:flex-row gap-3">
+                <button id="settings-export-btn" class="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold transition-all">
+                  <i class="fa-solid fa-download"></i>
+                  <span>Download Backup JSON</span>
+                </button>
+                <button id="settings-import-btn" class="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-semibold transition-all">
+                  <i class="fa-solid fa-upload"></i>
+                  <span>Restore from JSON File</span>
+                </button>
+              </div>
+
+              <!-- Drag & Drop Zone -->
+              <div id="drop-zone" class="border-2 border-dashed border-slate-800 hover:border-indigo-500/60 rounded-xl p-6 text-center cursor-pointer transition-colors bg-slate-900/40">
+                <i class="fa-solid fa-cloud-arrow-up text-2xl text-slate-500 mb-2"></i>
+                <p class="text-xs font-medium text-slate-300">Drag and drop workspace backup JSON file here</p>
+                <p class="text-[11px] text-slate-500 mt-1">or click to browse files</p>
+              </div>
+            </div>
+
+            <!-- Card 2: Workspace Storage Diagnostics -->
+            <div class="rounded-xl border border-slate-800 bg-[#0c1220] p-5 space-y-4">
+              <div class="flex items-center gap-3">
+                <div class="w-8 h-8 rounded-lg bg-emerald-500/10 text-emerald-400 flex items-center justify-center border border-emerald-500/20">
+                  <i class="fa-solid fa-hard-drive"></i>
+                </div>
+                <div>
+                  <h4 class="text-sm font-semibold text-white">Storage Diagnostics</h4>
+                  <p class="text-xs text-slate-400">Browser localStorage metrics and integrity inspection.</p>
+                </div>
+              </div>
+
+              <div class="pt-2 border-t border-slate-800/80 space-y-2.5 font-mono text-xs">
+                <div class="flex justify-between py-1 border-b border-slate-900">
+                  <span class="text-slate-400">Storage Engine:</span>
+                  <span class="text-slate-200">window.localStorage</span>
+                </div>
+                <div class="flex justify-between py-1 border-b border-slate-900">
+                  <span class="text-slate-400">Prompts Key:</span>
+                  <span class="text-indigo-400">workbench_prompts</span>
+                </div>
+                <div class="flex justify-between py-1 border-b border-slate-900">
+                  <span class="text-slate-400">Presets Key:</span>
+                  <span class="text-indigo-400">workbench_presets</span>
+                </div>
+                <div class="flex justify-between py-1 border-b border-slate-900">
+                  <span class="text-slate-400">Estimated Payload Size:</span>
+                  <span id="storage-bytes-metric" class="text-slate-200">Calculating...</span>
+                </div>
+              </div>
+
+              <!-- Reset to Defaults Button -->
+              <div class="pt-2">
+                <button id="reset-defaults-btn" class="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 text-xs font-medium transition-colors">
+                  <i class="fa-solid fa-rotate-left"></i>
+                  <span>Reset Default Templates</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- Card 3: Keyboard Shortcuts Guide -->
+            <div class="rounded-xl border border-slate-800 bg-[#0c1220] p-5 space-y-4 lg:col-span-2">
+              <div class="flex items-center gap-3">
+                <div class="w-8 h-8 rounded-lg bg-amber-500/10 text-amber-400 flex items-center justify-center border border-amber-500/20">
+                  <i class="fa-solid fa-keyboard"></i>
+                </div>
+                <div>
+                  <h4 class="text-sm font-semibold text-white">Global Keyboard Shortcuts</h4>
+                  <p class="text-xs text-slate-400">Accelerate your workflow with productivity shortcuts.</p>
+                </div>
+              </div>
+
+              <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 pt-2 border-t border-slate-800/80">
+                <div class="p-3 rounded-lg bg-slate-900/60 border border-slate-800/80 flex items-center justify-between">
+                  <span class="text-xs text-slate-300">Quick Launcher / Search</span>
+                  <kbd class="px-2 py-0.5 rounded bg-slate-800 border border-slate-700 text-[11px] font-mono text-indigo-300">Ctrl + K</kbd>
+                </div>
+                <div class="p-3 rounded-lg bg-slate-900/60 border border-slate-800/80 flex items-center justify-between">
+                  <span class="text-xs text-slate-300">Copy Active Output</span>
+                  <kbd class="px-2 py-0.5 rounded bg-slate-800 border border-slate-700 text-[11px] font-mono text-indigo-300">Ctrl + Enter</kbd>
+                </div>
+                <div class="p-3 rounded-lg bg-slate-900/60 border border-slate-800/80 flex items-center justify-between">
+                  <span class="text-xs text-slate-300">Close Modals / Drawers</span>
+                  <kbd class="px-2 py-0.5 rounded bg-slate-800 border border-slate-700 text-[11px] font-mono text-indigo-300">Escape</kbd>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+      </main>
+    </div>
+  </div>
+
+  <!-- ================= MODALS & OVERLAYS ================= -->
+
+  <!-- 1. PROMPT EDITOR MODAL -->
+  <div id="prompt-modal" class="fixed inset-0 z-50 flex items-center justify-center p-4 modal-backdrop hidden">
+    <div class="bg-[#0f172a] border border-slate-800 rounded-xl w-full max-w-2xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+      
+      <!-- Modal Header -->
+      <div class="p-4 border-b border-slate-800 flex items-center justify-between bg-[#0c1220]">
+        <div class="flex items-center gap-2">
+          <i class="fa-solid fa-pen-to-square text-indigo-400"></i>
+          <h3 id="prompt-modal-title" class="text-sm font-semibold text-white">Create Prompt Template</h3>
+        </div>
+        <button id="prompt-modal-close" class="text-slate-400 hover:text-white p-1 rounded hover:bg-slate-800">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+
+      <!-- Modal Body -->
+      <form id="prompt-form" class="p-5 overflow-y-auto space-y-4 flex-1">
+        <input type="hidden" id="prompt-id">
+
+        <div>
+          <label for="prompt-title-input" class="block text-xs font-medium text-slate-300 mb-1">Title <span class="text-rose-400">*</span></label>
+          <input type="text" id="prompt-title-input" required placeholder="e.g., Code Reviewer & Security Auditor" class="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-xs text-white focus:outline-none focus:border-indigo-500">
+        </div>
+
+        <div>
+          <label for="prompt-desc-input" class="block text-xs font-medium text-slate-300 mb-1">Description <span class="text-rose-400">*</span></label>
+          <input type="text" id="prompt-desc-input" required placeholder="A brief summary of what this system prompt does..." class="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-xs text-white focus:outline-none focus:border-indigo-500">
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label for="prompt-category-input" class="block text-xs font-medium text-slate-300 mb-1">Primary Category</label>
+            <select id="prompt-category-input" class="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-xs text-white focus:outline-none focus:border-indigo-500">
+              <option value="coding">Coding</option>
+              <option value="architecture">Architecture</option>
+              <option value="ui">UI & Styling</option>
+              <option value="debugging">Debugging</option>
+              <option value="security">Security</option>
+              <option value="general">General</option>
+            </select>
+          </div>
+
+          <div>
+            <label for="prompt-tags-input" class="block text-xs font-medium text-slate-300 mb-1">Tags (comma-separated)</label>
+            <input type="text" id="prompt-tags-input" placeholder="e.g. react, security, clean-code" class="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-xs text-white focus:outline-none focus:border-indigo-500">
+          </div>
+        </div>
+
+        <div>
+          <div class="flex items-center justify-between mb-1">
+            <label for="prompt-body-input" class="block text-xs font-medium text-slate-300">Prompt Body <span class="text-rose-400">*</span></label>
+            <span class="text-[10px] text-slate-400">Use <code class="text-indigo-400 font-mono">{{VARIABLE_NAME}}</code> for variables</span>
+          </div>
+          <textarea id="prompt-body-input" required rows="9" placeholder="Enter your system prompt here. E.g.: You are an expert {{LANGUAGE}} engineer..." class="w-full p-3 rounded-lg bg-slate-900 border border-slate-800 text-xs text-slate-200 font-mono focus:outline-none focus:border-indigo-500 leading-relaxed"></textarea>
+        </div>
+      </form>
+
+      <!-- Modal Footer -->
+      <div class="p-4 border-t border-slate-800 bg-[#0c1220] flex items-center justify-end gap-2">
+        <button type="button" id="prompt-modal-cancel" class="px-3.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium">Cancel</button>
+        <button type="submit" form="prompt-form" id="prompt-modal-submit" class="px-4 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold">Save Prompt</button>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- 2. QUICK LAUNCHER MODAL (Ctrl + K) -->
+  <div id="launcher-modal" class="fixed inset-0 z-50 flex items-start justify-center pt-20 p-4 modal-backdrop hidden">
+    <div class="bg-[#0f172a] border border-slate-800 rounded-xl w-full max-w-lg shadow-2xl overflow-hidden">
+      <!-- Search Input -->
+      <div class="p-3 border-b border-slate-800 flex items-center gap-3 bg-[#0c1220]">
+        <i class="fa-solid fa-magnifying-glass text-slate-400 text-sm"></i>
+        <input type="text" id="launcher-input" placeholder="Type a destination or action (e.g., 'Diff', 'New', 'Library')..." class="w-full bg-transparent text-sm text-white placeholder-slate-500 focus:outline-none">
+        <kbd class="text-[10px] font-mono bg-slate-800 px-1.5 py-0.5 rounded text-slate-400 border border-slate-700">ESC</kbd>
+      </div>
+
+      <!-- Quick Options List -->
+      <div id="launcher-results" class="max-h-72 overflow-y-auto p-2 space-y-1">
+        <!-- Dynamically rendered launcher actions -->
+      </div>
+    </div>
+  </div>
+
+  <!-- 3. IMPORT PREVIEW & CONFIRMATION MODAL -->
+  <div id="import-modal" class="fixed inset-0 z-50 flex items-center justify-center p-4 modal-backdrop hidden">
+    <div class="bg-[#0f172a] border border-slate-800 rounded-xl w-full max-w-md shadow-2xl overflow-hidden">
+      <div class="p-4 border-b border-slate-800 flex items-center justify-between bg-[#0c1220]">
+        <div class="flex items-center gap-2">
+          <i class="fa-solid fa-file-import text-emerald-400"></i>
+          <h3 class="text-sm font-semibold text-white">Import Workspace Backup</h3>
+        </div>
+        <button id="import-modal-close" class="text-slate-400 hover:text-white p-1 rounded hover:bg-slate-800">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+
+      <div class="p-5 space-y-4 text-xs">
+        <p class="text-slate-300">A valid workbench backup file was detected. Please choose how you want to restore it:</p>
+        
+        <div class="p-3 rounded-lg bg-slate-900 border border-slate-800 space-y-1.5 font-mono">
+          <div class="flex justify-between text-slate-400">
+            <span>Version:</span> <span id="import-preview-version" class="text-slate-200">1.0</span>
+          </div>
+          <div class="flex justify-between text-slate-400">
+            <span>Prompts to import:</span> <span id="import-preview-prompts" class="text-indigo-400 font-bold">0</span>
+          </div>
+          <div class="flex justify-between text-slate-400">
+            <span>Presets to import:</span> <span id="import-preview-presets" class="text-emerald-400 font-bold">0</span>
+          </div>
+        </div>
+
+        <div class="space-y-2">
+          <label class="block text-slate-300 font-medium">Restore Mode:</label>
+          <div class="space-y-2">
+            <label class="flex items-center gap-2.5 p-2 rounded-lg bg-slate-900/60 border border-slate-800 cursor-pointer hover:bg-slate-800/40">
+              <input type="radio" name="import-mode" value="merge" checked class="text-indigo-600 focus:ring-0">
+              <div>
+                <strong class="text-white block">Merge with existing</strong>
+                <span class="text-slate-400 text-[11px]">Keep current prompts and append imported ones (replaces duplicates by ID).</span>
+              </div>
+            </label>
+            <label class="flex items-center gap-2.5 p-2 rounded-lg bg-slate-900/60 border border-slate-800 cursor-pointer hover:bg-slate-800/40">
+              <input type="radio" name="import-mode" value="replace" class="text-indigo-600 focus:ring-0">
+              <div>
+                <strong class="text-rose-400 block">Replace entire workspace</strong>
+                <span class="text-slate-400 text-[11px]">Completely overwrite local prompts and presets with imported backup.</span>
+              </div>
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <div class="p-4 border-t border-slate-800 bg-[#0c1220] flex items-center justify-end gap-2">
+        <button id="import-modal-cancel" class="px-3.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium">Cancel</button>
+        <button id="import-modal-apply" class="px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold">Apply Restore</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 4. TOAST NOTIFICATION CONTAINER -->
+  <div id="toast-container" class="fixed bottom-4 right-4 z-50 flex flex-col gap-2 pointer-events-none max-w-sm w-full">
+    <!-- Dynamic Toasts will append here -->
+  </div>
+
+  <!-- ================= JAVASCRIPT INITIALIZATION ================= -->
+  <script>
+    /**
+     * AI Prompt & Code Studio Workbench - Core Client Architecture
+     */
+    (function () {
+      'use strict';
+
+      // --- STATE & CONSTANTS ---
+      const VIEWS = {
+        library: {
+          title: 'Prompt Library',
+          desc: 'Manage, curate, and search production system prompt templates'
+        },
+        injector: {
+          title: 'Variable Injector',
+          desc: 'Detect template variables and generate customized AI prompts in real time'
+        },
+        diff: {
+          title: 'Diff & Patch Inspector',
+          desc: 'Side-by-side line comparison and patch inspection for AI-generated code'
+        },
+        settings: {
+          title: 'Settings & Workspace Backup',
+          desc: 'Diagnostics, JSON workspace export/restore, and keyboard navigation'
+        }
+      };
+
+      let activeView = 'library';
+
+      // --- UI ELEMENT REFS ---
+      const sidebar = document.getElementById('app-sidebar');
+      const mobileOverlay = document.getElementById('mobile-overlay');
+      const openSidebarBtn = document.getElementById('open-sidebar-btn');
+      const closeSidebarBtn = document.getElementById('close-sidebar-btn');
+      const topTitle = document.getElementById('top-view-title');
+      const topDesc = document.getElementById('top-view-desc');
+      const navButtons = document.querySelectorAll('.nav-item');
+      const viewPanels = document.querySelectorAll('.view-panel');
+      const toastContainer = document.getElementById('toast-container');
+
+      // --- TOAST NOTIFICATION ENGINE ---
+      function showToast(message, type = 'info', duration = 3000) {
+        const toast = document.createElement('div');
+        toast.className = 'toast-anim pointer-events-auto flex items-center gap-3 p-3 rounded-lg border shadow-lg text-xs font-medium text-white transition-all';
+        
+        let iconHtml = '<i class="fa-solid fa-circle-info text-indigo-400"></i>';
+        let bgBorder = 'bg-slate-900/95 border-slate-700';
+
+        if (type === 'success') {
+          iconHtml = '<i class="fa-solid fa-circle-check text-emerald-400"></i>';
+          bgBorder = 'bg-slate-900/95 border-emerald-500/40 text-emerald-100';
+        } else if (type === 'error') {
+          iconHtml = '<i class="fa-solid fa-triangle-exclamation text-rose-400"></i>';
+          bgBorder = 'bg-slate-900/95 border-rose-500/40 text-rose-100';
+        } else if (type === 'warning') {
+          iconHtml = '<i class="fa-solid fa-circle-exclamation text-amber-400"></i>';
+          bgBorder = 'bg-slate-900/95 border-amber-500/40 text-amber-100';
+        }
+
+        toast.className += ` ${bgBorder}`;
+        toast.innerHTML = `
+          ${iconHtml}
+          <div class="flex-1">${message}</div>
+          <button class="text-slate-400 hover:text-white ml-2 text-xs" onclick="this.parentElement.remove()">&times;</button>
+        `;
+
+        toastContainer.appendChild(toast);
+
+        setTimeout(() => {
+          if (toast.parentElement) {
+            toast.style.opacity = '0';
+            toast.style.transform = 'translateY(10px)';
+            setTimeout(() => toast.remove(), 200);
+          }
+        }, duration);
+      }
+
+      // Expose globally for workbench modules
+      window.WorkbenchToast = { show: showToast };
+
+      // --- NAVIGATION CONTROLLER ---
+      function switchView(viewName) {
+        if (!VIEWS[viewName]) return;
+        activeView = viewName;
+
+        // Update Top Header
+        topTitle.textContent = VIEWS[viewName].title;
+        topDesc.textContent = VIEWS[viewName].desc;
+
+        // Update Sidebar Nav State
+        navButtons.forEach(btn => {
+          const target = btn.getAttribute('data-nav');
+          if (target === viewName) {
+            btn.className = 'nav-item group w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-sm font-medium transition-colors bg-indigo-600/15 text-indigo-400 border border-indigo-500/30';
+          } else {
+            btn.className = 'nav-item group w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-sm font-medium transition-colors text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border border-transparent';
+          }
+        });
+
+        // Toggle View Panels
+        viewPanels.forEach(panel => {
+          if (panel.id === `view-${viewName}`) {
+            panel.classList.remove('hidden');
+          } else {
+            panel.classList.add('hidden');
+          }
+        });
+
+        // Close mobile drawer if open
+        closeMobileSidebar();
+
+        // Dispatch Custom Event for View Activation
+        window.dispatchEvent(new CustomEvent('workbench:view-changed', { detail: { view: viewName } }));
+      }
+
+      function openMobileSidebar() {
+        sidebar.classList.remove('-translate-x-full');
+        mobileOverlay.classList.remove('hidden');
+      }
+
+      function closeMobileSidebar() {
+        sidebar.classList.add('-translate-x-full');
+        mobileOverlay.classList.add('hidden');
+      }
+
+      // --- EVENT BINDINGS ---
+      navButtons.forEach(btn => {
+        btn.addEventListener('click', () => {
+          const target = btn.getAttribute('data-nav');
+          switchView(target);
+        });
+      });
+
+      if (openSidebarBtn) openSidebarBtn.addEventListener('click', openMobileSidebar);
+      if (closeSidebarBtn) closeSidebarBtn.addEventListener('click', closeMobileSidebar);
+      if (mobileOverlay) mobileOverlay.addEventListener('click', closeMobileSidebar);
+
+      // --- STORAGE STATUS PROBE ---
+      function checkStorageStatus() {
+        const statusDot = document.getElementById('storage-status-dot');
+        const statusText = document.getElementById('storage-usage-text');
+        try {
+          const testKey = '__wb_test__';
+          localStorage.setItem(testKey, testKey);
+          localStorage.removeItem(testKey);
+          if (statusDot) statusDot.className = 'w-2 h-2 rounded-full bg-emerald-400 animate-pulse';
+          if (statusText) statusText.textContent = 'Active (Local)';
+          return true;
+        } catch (e) {
+          if (statusDot) statusDot.className = 'w-2 h-2 rounded-full bg-rose-500';
+          if (statusText) statusText.textContent = 'Unavailable';
+          showToast('Local storage is unavailable or disabled. Changes may not persist.', 'warning', 6000);
+          return false;
+        }
+      }
+
+      // Expose switchView
+      window.WorkbenchNav = { switchView };
+
+      // Initialize default view
+      document.addEventListener('DOMContentLoaded', () => {
+        checkStorageStatus();
+        switchView('library');
+      });
+
+    })();
+  </script>
+</body>
+</html>

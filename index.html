@@ -2217,6 +2217,528 @@ Instructions:
 
       window.WorkbenchDiff = DiffController;
 
+      // ==========================================
+      // STAGE 5: WORKSPACE BACKUP, RESTORE & UTILS
+      // ==========================================
+      const BackupManager = {
+        pendingImportData: null,
+
+        exportBackup() {
+          try {
+            const prompts = PromptStore.getAll();
+            const presets = PresetStore.getAll();
+            const dateStr = new Date().toISOString().split('T')[0];
+
+            const payload = {
+              app: 'AI Prompt & Code Studio Workbench',
+              schemaVersion: '1.0',
+              exportedAt: new Date().toISOString(),
+              data: {
+                prompts,
+                presets
+              }
+            };
+
+            const jsonStr = JSON.stringify(payload, null, 2);
+            const blob = new Blob([jsonStr], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `prompt-workbench-backup-${dateStr}.json`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+
+            showToast(`Exported ${prompts.length} prompts & ${presets.length} presets to JSON!`, 'success');
+          } catch (e) {
+            console.error('Export failed:', e);
+            showToast('Failed to export workspace backup.', 'error');
+          }
+        },
+
+        handleFileSelected(file) {
+          if (!file) return;
+
+          const reader = new FileReader();
+          reader.onload = (e) => {
+            try {
+              const content = e.target.result;
+              const parsed = JSON.parse(content);
+              this.validateAndPreviewImport(parsed);
+            } catch (parseErr) {
+              console.error('Invalid JSON file:', parseErr);
+              showToast('Invalid JSON file. Please provide a valid workbench backup.', 'error');
+            }
+          };
+          reader.onerror = () => {
+            showToast('Error reading the selected file.', 'error');
+          };
+          reader.readAsText(file);
+        },
+
+        validateAndPreviewImport(rawJson) {
+          if (!rawJson || typeof rawJson !== 'object') {
+            showToast('Invalid backup file structure.', 'error');
+            return;
+          }
+
+          // Support both direct arrays/objects and wrapped schema
+          let promptsList = [];
+          let presetsList = [];
+          let version = rawJson.schemaVersion || rawJson.version || '1.0';
+
+          if (rawJson.data && typeof rawJson.data === 'object') {
+            promptsList = Array.isArray(rawJson.data.prompts) ? rawJson.data.prompts : [];
+            presetsList = Array.isArray(rawJson.data.presets) ? rawJson.data.presets : [];
+          } else if (Array.isArray(rawJson.prompts)) {
+            promptsList = rawJson.prompts;
+            presetsList = Array.isArray(rawJson.presets) ? rawJson.presets : [];
+          } else if (Array.isArray(rawJson)) {
+            promptsList = rawJson;
+          }
+
+          // Validate prompt records structure
+          const validPrompts = promptsList.filter(p => {
+            return p && typeof p === 'object' && typeof p.title === 'string' && typeof p.body === 'string';
+          }).map(p => ({
+            id: p.id || 'prompt_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6),
+            title: p.title.trim(),
+            description: p.description ? String(p.description).trim() : '',
+            category: p.category ? String(p.category).trim() : 'general',
+            tags: Array.isArray(p.tags) ? p.tags.map(t => String(t).trim()).filter(Boolean) : [],
+            body: String(p.body),
+            createdAt: p.createdAt || new Date().toISOString(),
+            updatedAt: p.updatedAt || new Date().toISOString()
+          }));
+
+          // Validate preset records structure
+          const validPresets = presetsList.filter(pr => {
+            return pr && typeof pr === 'object' && pr.promptId && pr.name && pr.values;
+          }).map(pr => ({
+            id: pr.id || 'preset_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6),
+            promptId: String(pr.promptId),
+            name: String(pr.name).trim(),
+            values: typeof pr.values === 'object' ? pr.values : {},
+            createdAt: pr.createdAt || new Date().toISOString()
+          }));
+
+          if (validPrompts.length === 0 && validPresets.length === 0) {
+            showToast('No valid prompts or presets found in backup file.', 'warning');
+            return;
+          }
+
+          // Store validated data in memory pending confirmation
+          this.pendingImportData = {
+            version,
+            prompts: validPrompts,
+            presets: validPresets
+          };
+
+          // Populate Preview Modal
+          const modal = document.getElementById('import-modal');
+          const versionEl = document.getElementById('import-preview-version');
+          const promptsEl = document.getElementById('import-preview-prompts');
+          const presetsEl = document.getElementById('import-preview-presets');
+
+          if (versionEl) versionEl.textContent = version;
+          if (promptsEl) promptsEl.textContent = validPrompts.length;
+          if (presetsEl) presetsEl.textContent = validPresets.length;
+
+          if (modal) modal.classList.remove('hidden');
+        },
+
+        applyImport(mode = 'merge') {
+          if (!this.pendingImportData) {
+            showToast('No pending import data to restore.', 'warning');
+            return;
+          }
+
+          const { prompts: newPrompts, presets: newPresets } = this.pendingImportData;
+
+          try {
+            if (mode === 'replace') {
+              PromptStore.saveAll(newPrompts);
+              localStorage.setItem(STORAGE_KEYS.PRESETS, JSON.stringify(newPresets));
+              showToast(`Replaced workspace with ${newPrompts.length} prompts & ${newPresets.length} presets!`, 'success');
+            } else {
+              // Merge mode
+              const existingPrompts = PromptStore.getAll();
+              const existingPresets = PresetStore.getAll();
+
+              // Merge prompts by ID
+              const promptMap = new Map();
+              existingPrompts.forEach(p => promptMap.set(p.id, p));
+              newPrompts.forEach(p => promptMap.set(p.id, p));
+              PromptStore.saveAll(Array.from(promptMap.values()));
+
+              // Merge presets by ID
+              const presetMap = new Map();
+              existingPresets.forEach(pr => presetMap.set(pr.id, pr));
+              newPresets.forEach(pr => presetMap.set(pr.id, pr));
+              localStorage.setItem(STORAGE_KEYS.PRESETS, JSON.stringify(Array.from(presetMap.values())));
+
+              showToast(`Merged ${newPrompts.length} prompts & ${newPresets.length} presets successfully!`, 'success');
+            }
+
+            // Close modal & refresh UI
+            const modal = document.getElementById('import-modal');
+            if (modal) modal.classList.add('hidden');
+            this.pendingImportData = null;
+
+            renderPrompts();
+            updateMetricsAndCounters();
+            if (window.WorkbenchInjector) {
+              window.WorkbenchInjector.populatePromptDropdown();
+            }
+          } catch (e) {
+            console.error('Failed to apply import:', e);
+            showToast('Failed to apply workspace import.', 'error');
+          }
+        }
+      };
+
+      window.WorkbenchBackup = BackupManager;
+
+      // Quick Launcher Controller (Ctrl + K)
+      const QuickLauncher = {
+        modal: null,
+        input: null,
+        resultsContainer: null,
+        selectedIndex: 0,
+        currentItems: [],
+
+        init() {
+          this.modal = document.getElementById('launcher-modal');
+          this.input = document.getElementById('launcher-input');
+          this.resultsContainer = document.getElementById('launcher-results');
+
+          if (!this.modal || !this.input || !this.resultsContainer) return;
+
+          this.bindEvents();
+        },
+
+        open() {
+          this.modal.classList.remove('hidden');
+          this.input.value = '';
+          this.selectedIndex = 0;
+          this.search('');
+          setTimeout(() => this.input.focus(), 50);
+        },
+
+        close() {
+          this.modal.classList.add('hidden');
+        },
+
+        bindEvents() {
+          this.input.addEventListener('input', (e) => {
+            this.selectedIndex = 0;
+            this.search(e.target.value);
+          });
+
+          this.input.addEventListener('keydown', (e) => {
+            if (e.key === 'ArrowDown') {
+              e.preventDefault();
+              if (this.currentItems.length > 0) {
+                this.selectedIndex = (this.selectedIndex + 1) % this.currentItems.length;
+                this.updateSelection();
+              }
+            } else if (e.key === 'ArrowUp') {
+              e.preventDefault();
+              if (this.currentItems.length > 0) {
+                this.selectedIndex = (this.selectedIndex - 1 + this.currentItems.length) % this.currentItems.length;
+                this.updateSelection();
+              }
+            } else if (e.key === 'Enter') {
+              e.preventDefault();
+              if (this.currentItems[this.selectedIndex]) {
+                this.currentItems[this.selectedIndex].action();
+                this.close();
+              }
+            } else if (e.key === 'Escape') {
+              this.close();
+            }
+          });
+
+          this.modal.addEventListener('click', (e) => {
+            if (e.target === this.modal) this.close();
+          });
+        },
+
+        search(query) {
+          const q = (query || '').trim().toLowerCase();
+          const items = [];
+
+          // Views
+          items.push({
+            id: 'nav_library',
+            title: 'Prompt Library',
+            subtitle: 'Browse, manage, and filter system prompts',
+            category: 'Navigation',
+            icon: 'fa-book-bookmark text-indigo-400',
+            action: () => switchView('library')
+          });
+
+          items.push({
+            id: 'nav_injector',
+            title: 'Variable Injector',
+            subtitle: 'Substitute dynamic {{VARIABLES}} into prompt templates',
+            category: 'Navigation',
+            icon: 'fa-sliders text-emerald-400',
+            action: () => switchView('injector')
+          });
+
+          items.push({
+            id: 'nav_diff',
+            title: 'Diff & Patch Inspector',
+            subtitle: 'Side-by-side line comparison for AI code modifications',
+            category: 'Navigation',
+            icon: 'fa-code-compare text-amber-400',
+            action: () => switchView('diff')
+          });
+
+          items.push({
+            id: 'nav_settings',
+            title: 'Settings & Workspace Backup',
+            subtitle: 'Export/import JSON workspace backups and diagnostics',
+            category: 'Navigation',
+            icon: 'fa-gear text-slate-400',
+            action: () => switchView('settings')
+          });
+
+          // Quick Actions
+          items.push({
+            id: 'act_new_prompt',
+            title: 'Create New Prompt Template',
+            subtitle: 'Add a new reusable system prompt with variable placeholders',
+            category: 'Action',
+            icon: 'fa-plus text-indigo-400',
+            action: () => openPromptModal()
+          });
+
+          items.push({
+            id: 'act_export',
+            title: 'Export Workspace Backup',
+            subtitle: 'Download complete JSON backup file to local disk',
+            category: 'Action',
+            icon: 'fa-download text-indigo-400',
+            action: () => BackupManager.exportBackup()
+          });
+
+          // All Prompts search
+          const allPrompts = PromptStore.getAll();
+          allPrompts.forEach(p => {
+            items.push({
+              id: `prompt_${p.id}`,
+              title: p.title,
+              subtitle: p.description,
+              category: `Prompt (${p.category || 'general'})`,
+              icon: 'fa-file-lines text-indigo-300',
+              action: () => {
+                switchView('injector');
+                const injectorSelect = document.getElementById('injector-prompt-select');
+                if (injectorSelect) {
+                  injectorSelect.value = p.id;
+                  injectorSelect.dispatchEvent(new Event('change'));
+                }
+              }
+            });
+          });
+
+          // Filter by query
+          this.currentItems = items.filter(item => {
+            if (!q) return true;
+            return item.title.toLowerCase().includes(q) ||
+                   item.subtitle.toLowerCase().includes(q) ||
+                   item.category.toLowerCase().includes(q);
+          }).slice(0, 10); // Limit to top 10 results
+
+          this.render();
+        },
+
+        render() {
+          if (this.currentItems.length === 0) {
+            this.resultsContainer.innerHTML = `
+              <div class="py-8 text-center text-xs text-slate-500">
+                No matching navigation or prompt found.
+              </div>
+            `;
+            return;
+          }
+
+          this.resultsContainer.innerHTML = this.currentItems.map((item, idx) => {
+            const isSelected = idx === this.selectedIndex;
+            return `
+              <div class="launcher-item flex items-center justify-between p-2.5 rounded-lg cursor-pointer text-xs transition-colors ${isSelected ? 'bg-indigo-600/20 border border-indigo-500/40 text-white' : 'hover:bg-slate-800/60 text-slate-300 border border-transparent'}" data-index="${idx}">
+                <div class="flex items-center gap-3 min-w-0">
+                  <div class="w-7 h-7 rounded-md bg-slate-900 flex items-center justify-center border border-slate-800 flex-shrink-0">
+                    <i class="fa-solid ${item.icon} text-xs"></i>
+                  </div>
+                  <div class="min-w-0">
+                    <div class="font-medium truncate ${isSelected ? 'text-indigo-200' : 'text-slate-200'}">${escapeHtml(item.title)}</div>
+                    <div class="text-[11px] text-slate-500 truncate">${escapeHtml(item.subtitle)}</div>
+                  </div>
+                </div>
+                <span class="text-[10px] font-mono text-slate-500 uppercase px-1.5 py-0.5 rounded bg-slate-900 border border-slate-800 flex-shrink-0 ml-2">${escapeHtml(item.category)}</span>
+              </div>
+            `;
+          }).join('');
+
+          // Click handler for launcher items
+          this.resultsContainer.querySelectorAll('.launcher-item').forEach(el => {
+            el.addEventListener('click', () => {
+              const idx = parseInt(el.getAttribute('data-index'), 10);
+              if (this.currentItems[idx]) {
+                this.currentItems[idx].action();
+                this.close();
+              }
+            });
+          });
+        },
+
+        updateSelection() {
+          this.resultsContainer.querySelectorAll('.launcher-item').forEach((el, idx) => {
+            if (idx === this.selectedIndex) {
+              el.className = 'launcher-item flex items-center justify-between p-2.5 rounded-lg cursor-pointer text-xs transition-colors bg-indigo-600/20 border border-indigo-500/40 text-white';
+              el.scrollIntoView({ block: 'nearest' });
+            } else {
+              el.className = 'launcher-item flex items-center justify-between p-2.5 rounded-lg cursor-pointer text-xs transition-colors hover:bg-slate-800/60 text-slate-300 border border-transparent';
+            }
+          });
+        }
+      };
+
+      window.WorkbenchLauncher = QuickLauncher;
+
+      // Bind Stage 5 Elements & Event Handlers
+      function bindStage5Events() {
+        QuickLauncher.init();
+
+        // Header Export / Import
+        const headerExportBtn = document.getElementById('header-export-btn');
+        const headerImportBtn = document.getElementById('header-import-btn');
+        const fileInput = document.getElementById('header-import-file-input');
+
+        if (headerExportBtn) headerExportBtn.addEventListener('click', () => BackupManager.exportBackup());
+        if (headerImportBtn && fileInput) {
+          headerImportBtn.addEventListener('click', () => fileInput.click());
+        }
+
+        // Settings Export / Import & Drag-Drop
+        const settingsExportBtn = document.getElementById('settings-export-btn');
+        const settingsImportBtn = document.getElementById('settings-import-btn');
+        const dropZone = document.getElementById('drop-zone');
+
+        if (settingsExportBtn) settingsExportBtn.addEventListener('click', () => BackupManager.exportBackup());
+        if (settingsImportBtn && fileInput) {
+          settingsImportBtn.addEventListener('click', () => fileInput.click());
+        }
+
+        if (fileInput) {
+          fileInput.addEventListener('change', (e) => {
+            if (e.target.files && e.target.files[0]) {
+              BackupManager.handleFileSelected(e.target.files[0]);
+              fileInput.value = ''; // Reset input
+            }
+          });
+        }
+
+        // Drag and Drop Zone in Settings
+        if (dropZone) {
+          dropZone.addEventListener('click', () => {
+            if (fileInput) fileInput.click();
+          });
+
+          ['dragenter', 'dragover'].forEach(eventName => {
+            dropZone.addEventListener(eventName, (e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              dropZone.classList.add('border-indigo-500', 'bg-indigo-950/20');
+            });
+          });
+
+          ['dragleave', 'drop'].forEach(eventName => {
+            dropZone.addEventListener(eventName, (e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              dropZone.classList.remove('border-indigo-500', 'bg-indigo-950/20');
+            });
+          });
+
+          dropZone.addEventListener('drop', (e) => {
+            if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]) {
+              BackupManager.handleFileSelected(e.dataTransfer.files[0]);
+            }
+          });
+        }
+
+        // Import Modal Actions
+        const importModal = document.getElementById('import-modal');
+        const importModalClose = document.getElementById('import-modal-close');
+        const importModalCancel = document.getElementById('import-modal-cancel');
+        const importModalApply = document.getElementById('import-modal-apply');
+
+        if (importModalClose) importModalClose.addEventListener('click', () => importModal.classList.add('hidden'));
+        if (importModalCancel) importModalCancel.addEventListener('click', () => importModal.classList.add('hidden'));
+        if (importModalApply) {
+          importModalApply.addEventListener('click', () => {
+            const selectedMode = document.querySelector('input[name="import-mode"]:checked')?.value || 'merge';
+            BackupManager.applyImport(selectedMode);
+          });
+        }
+
+        // Quick Launcher Trigger Button
+        const quickLauncherBtn = document.getElementById('quick-launcher-btn');
+        if (quickLauncherBtn) {
+          quickLauncherBtn.addEventListener('click', () => QuickLauncher.open());
+        }
+
+        // Global Keyboard Shortcuts
+        window.addEventListener('keydown', (e) => {
+          const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+          const isCmdOrCtrl = isMac ? e.metaKey : e.ctrlKey;
+
+          // Ctrl + K or Cmd + K -> Open Quick Launcher
+          if (isCmdOrCtrl && e.key.toLowerCase() === 'k') {
+            e.preventDefault();
+            QuickLauncher.open();
+            return;
+          }
+
+          // Ctrl + Enter or Cmd + Enter -> Copy Active Output
+          if (isCmdOrCtrl && e.key === 'Enter') {
+            e.preventDefault();
+            if (activeView === 'injector') {
+              const text = InjectorController.getFinalSubstitutedText();
+              copyTextToClipboard(text, 'Final prompt output copied to clipboard!');
+            } else if (activeView === 'diff') {
+              const modInput = document.getElementById('diff-mod-input');
+              if (modInput && modInput.value) {
+                copyTextToClipboard(modInput.value, 'Modified code copied to clipboard!');
+              }
+            } else if (activeView === 'library') {
+              const all = PromptStore.getAll();
+              if (all.length > 0) {
+                copyTextToClipboard(all[0].body, `Copied "${all[0].title}" to clipboard!`);
+              }
+            }
+            return;
+          }
+
+          // Escape -> Close Modals
+          if (e.key === 'Escape') {
+            const promptM = document.getElementById('prompt-modal');
+            const launchM = document.getElementById('launcher-modal');
+            const impM = document.getElementById('import-modal');
+
+            if (promptM && !promptM.classList.contains('hidden')) promptM.classList.add('hidden');
+            if (launchM && !launchM.classList.contains('hidden')) launchM.classList.add('hidden');
+            if (impM && !impM.classList.contains('hidden')) impM.classList.add('hidden');
+            closeMobileSidebar();
+          }
+        });
+      }
+
       // --- NAVIGATION CONTROLLER ---
       function switchView(viewName) {
         if (!VIEWS[viewName]) return;
@@ -2303,6 +2825,7 @@ Instructions:
         renderPrompts();
         InjectorController.init();
         DiffController.init();
+        bindStage5Events();
         updateMetricsAndCounters();
         switchView('library');
       });
